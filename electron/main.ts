@@ -102,6 +102,14 @@ function recordPortForProcess(processId: string, port: number) {
 	const history = loadPortHistory();
 	history[processId] = port;
 	savePortHistory(history);
+
+	// Also save the port to the process config so it persists
+	const configs = loadProcessConfigs();
+	const index = configs.findIndex(c => c.id === processId);
+	if (index >= 0 && configs[index].port !== port) {
+		configs[index].port = port;
+		saveProcessConfigs(configs);
+	}
 }
 
 function getKnownPorts(): number[] {
@@ -178,6 +186,7 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 				const detectedPort = detectPortFromOutput(data);
 				if (detectedPort) {
 					managed.state.port = detectedPort;
+					managed.state.config.port = detectedPort;
 					recordPortForProcess(config.id, detectedPort);
 				}
 			}
@@ -309,6 +318,7 @@ async function collectMetrics() {
 					const detectedPort = detectPortFromOutput(managed.outputBuffer);
 					if (detectedPort) {
 						managed.state.port = detectedPort;
+						managed.state.config.port = detectedPort;
 						recordPortForProcess(id, detectedPort);
 					}
 				}
