@@ -96,10 +96,17 @@
 		if (terminal) terminal.dispose();
 	});
 
+	let wasRunning = $state(running);
+
 	$effect(() => {
 		if (terminal && !running) {
 			terminal.write('\r\n\x1b[90m[Process not running]\x1b[0m\r\n');
 		}
+		// Clear terminal when process starts (transition from stopped to running)
+		if (terminal && running && !wasRunning) {
+			terminal.clear();
+		}
+		wasRunning = running;
 	});
 </script>
 
