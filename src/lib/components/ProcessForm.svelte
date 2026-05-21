@@ -17,7 +17,7 @@
 	let cwd = $state(process?.cwd || '');
 	let type: 'server' | 'job' = $state(process?.type || 'server');
 	let autoRestart = $state(process?.autoRestart ?? false);
-	let port = $state(process?.port?.toString() || '');
+	let port: number | null = $state(process?.port ?? null);
 
 	function generateId(): string {
 		return `proc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -32,7 +32,7 @@
 			cwd: cwd.trim(),
 			type,
 			autoRestart,
-			port: type === 'server' && port.trim() ? parseInt(port.trim(), 10) : undefined
+			port: type === 'server' && port ? port : undefined
 		};
 		onSave(config);
 	}
