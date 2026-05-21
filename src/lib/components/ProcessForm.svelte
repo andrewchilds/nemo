@@ -5,11 +5,12 @@
 
 	interface Props {
 		process: ProcessConfig | null;
+		detectedPort?: number;
 		onSave: (config: ProcessConfig) => void;
 		onCancel: () => void;
 	}
 
-	let { process, onSave, onCancel }: Props = $props();
+	let { process, detectedPort, onSave, onCancel }: Props = $props();
 
 	let name = $state(process?.name || '');
 	let description = $state(process?.description || '');
@@ -17,7 +18,7 @@
 	let cwd = $state(process?.cwd || '');
 	let type: 'server' | 'job' = $state(process?.type || 'server');
 	let autoRestart = $state(process?.autoRestart ?? false);
-	let port: number | null = $state(process?.port ?? null);
+	let port: number | null = $state(process?.port ?? detectedPort ?? null);
 
 	function generateId(): string {
 		return `proc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;

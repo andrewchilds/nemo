@@ -38,9 +38,12 @@
 		showForm = true;
 	}
 
+	let detectedPort: number | undefined = $state(undefined);
+
 	function handleEdit() {
 		if (selectedProcess) {
 			editingProcess = selectedProcess.config;
+			detectedPort = selectedProcess.port;
 			showForm = true;
 		}
 	}
@@ -86,7 +89,7 @@
 </div>
 
 {#if showForm}
-	<ProcessForm process={editingProcess} onSave={handleSave} onCancel={handleCancel} />
+	<ProcessForm process={editingProcess} {detectedPort} onSave={handleSave} onCancel={handleCancel} />
 {/if}
 
 <style>
