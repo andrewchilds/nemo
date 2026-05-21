@@ -106,6 +106,30 @@
 		box-sizing: border-box;
 	}
 
+	/* Custom dark scrollbars */
+	:global(*) {
+		scrollbar-width: thin;
+		scrollbar-color: #444 transparent;
+	}
+
+	:global(*::-webkit-scrollbar) {
+		width: 8px;
+		height: 8px;
+	}
+
+	:global(*::-webkit-scrollbar-track) {
+		background: transparent;
+	}
+
+	:global(*::-webkit-scrollbar-thumb) {
+		background: #444;
+		border-radius: 4px;
+	}
+
+	:global(*::-webkit-scrollbar-thumb:hover) {
+		background: #555;
+	}
+
 	:global(button),
 	:global(input),
 	:global(select),
