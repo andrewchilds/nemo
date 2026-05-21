@@ -17,6 +17,7 @@
 	let cwd = $state(process?.cwd || '');
 	let type: 'server' | 'job' = $state(process?.type || 'server');
 	let autoRestart = $state(process?.autoRestart ?? false);
+	let port = $state(process?.port?.toString() || '');
 
 	function generateId(): string {
 		return `proc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -30,7 +31,8 @@
 			command: command.trim(),
 			cwd: cwd.trim(),
 			type,
-			autoRestart
+			autoRestart,
+			port: type === 'server' && port.trim() ? parseInt(port.trim(), 10) : undefined
 		};
 		onSave(config);
 	}
@@ -67,6 +69,11 @@
 		</label>
 
 		{#if type === 'server'}
+			<label>
+				<span>Port (optional)</span>
+				<input type="number" bind:value={port} placeholder="Auto-detected" min="1" max="65535" />
+			</label>
+
 			<label class="checkbox">
 				<input type="checkbox" bind:checked={autoRestart} />
 				<span>Auto-restart on crash</span>
@@ -99,6 +106,7 @@
 	}
 
 	input[type='text'],
+	input[type='number'],
 	select {
 		width: 100%;
 		padding: 10px 12px;
@@ -111,6 +119,7 @@
 	}
 
 	input[type='text']:focus,
+	input[type='number']:focus,
 	select:focus {
 		outline: none;
 		border-color: #3b82f6;

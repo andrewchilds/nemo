@@ -17,6 +17,7 @@ interface ProcessConfig {
 	cwd: string;
 	type: 'server' | 'job';
 	autoRestart?: boolean;
+	port?: number;
 }
 
 interface ProcessState {
@@ -155,6 +156,7 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 			config,
 			status: 'running',
 			pid: ptyProcess.pid,
+			port: config.type === 'server' ? config.port : undefined,
 			startedAt: Date.now(),
 			metrics: []
 		};
@@ -171,8 +173,8 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 			if (managed.outputBuffer.length > 100000) {
 				managed.outputBuffer = managed.outputBuffer.slice(-100000);
 			}
-			// Try to detect port from new output if not already set
-			if (!managed.state.port) {
+			// Try to detect port from new output if not already set (only for servers)
+			if (!managed.state.port && config.type === 'server') {
 				const detectedPort = detectPortFromOutput(data);
 				if (detectedPort) {
 					managed.state.port = detectedPort;
@@ -302,8 +304,8 @@ async function collectMetrics() {
 					managed.state.metrics = managed.state.metrics.slice(-360);
 				}
 
-				// Detect port from output buffer if not already set
-				if (!managed.state.port) {
+				// Detect port from output buffer if not already set (only for servers)
+				if (!managed.state.port && managed.state.config.type === 'server') {
 					const detectedPort = detectPortFromOutput(managed.outputBuffer);
 					if (detectedPort) {
 						managed.state.port = detectedPort;
@@ -366,6 +368,15 @@ ipcMain.handle('process:update', (_event, config: ProcessConfig) => {
 		const managed = processes.get(config.id);
 		if (managed) {
 			managed.state.config = config;
+			// Update the runtime port state if port was manually set (servers only)
+			if (config.type === 'server' && config.port !== undefined) {
+				managed.state.port = config.port;
+				recordPortForProcess(config.id, config.port);
+			}
+		}
+		// Also update port history even if not currently running (servers only)
+		if (config.type === 'server' && config.port !== undefined) {
+			recordPortForProcess(config.id, config.port);
 		}
 	}
 	return { success: true };
@@ -499,13 +510,18 @@ ipcMain.handle('system:listening-processes', async (): Promise<ListeningProcess[
 				// Ignore errors
 			}
 
-			// Check if this port conflicts with a known Nemo process port
+			// Check if this port conflicts with a known Nemo server process port (skip jobs)
 			const portHistory = loadPortHistory();
+			const configs = loadProcessConfigs();
 			let conflictsWithProcessId: string | undefined;
 			for (const [processId, knownPort] of Object.entries(portHistory)) {
 				if (knownPort === port) {
-					conflictsWithProcessId = processId;
-					break;
+					// Only flag as conflict if the process is a server, not a job
+					const processConfig = configs.find(c => c.id === processId);
+					if (processConfig && processConfig.type === 'server') {
+						conflictsWithProcessId = processId;
+						break;
+					}
 				}
 			}
 

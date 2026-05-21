@@ -6,6 +6,7 @@ export interface ProcessConfig {
 	cwd: string;
 	type: 'server' | 'job';
 	autoRestart?: boolean;
+	port?: number;
 }
 
 export interface ProcessMetric {
