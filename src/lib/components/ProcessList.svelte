@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { Ellipsis, HatGlasses } from "lucide-svelte";
+	import { Ellipsis, HatGlasses, RefreshCw } from "lucide-svelte";
 	import type { ProcessState, ListeningProcess } from "$lib/types";
 	import { selectedProcessId, startProcess, stopProcess, reorderProcesses } from "$lib/stores/processes";
 	import ProcessCard from "./ProcessCard.svelte";
@@ -124,6 +124,9 @@
 		<div class="servers-section">
 			<div class="servers-header">
 				<h3>Other Servers</h3>
+				<button class="refresh-btn" onclick={loadListeningProcesses} title="Refresh">
+					<RefreshCw size={14} />
+				</button>
 			</div>
 			<div class="servers-list">
 				{#each listeningProcesses as proc (proc.pid)}
@@ -260,6 +263,26 @@
 	.servers-header {
 		padding: 8px 8px 0;
 		height: 60px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.refresh-btn {
+		background: transparent;
+		border: none;
+		color: #666;
+		cursor: pointer;
+		padding: 4px;
+		border-radius: 4px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.refresh-btn:hover {
+		color: #888;
+		background: #333;
 	}
 
 	.servers-header h3 {

@@ -119,8 +119,8 @@
 
 	<div class="footer">
 		<div class="status-info">
-			{#if process.port}
-				<span class="port">:{process.port}</span>
+			{#if process.port || process.config.port}
+				<span class="port">:{process.port || process.config.port}</span>
 			{/if}
 		</div>
 		<div class="footer-right">
