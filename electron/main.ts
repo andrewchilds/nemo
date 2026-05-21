@@ -146,6 +146,10 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 		if (existing.state.status === 'running') {
 			return existing;
 		}
+		// For jobs, remove the old process entry so we start fresh
+		if (config.type === 'job') {
+			processes.delete(config.id);
+		}
 	}
 
 	const shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/zsh';
