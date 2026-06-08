@@ -31,8 +31,8 @@
 	});
 	let latestMetrics = $derived(process.metrics[process.metrics.length - 1]);
 
-	// Get last 42 data points for charts (3.5 minutes at 5s intervals)
-	const MAX_BARS = 42;
+	// Get last 20 data points for charts (~1.5 minutes at 5s intervals)
+	const MAX_BARS = 20;
 	let recentMetrics = $derived(process.metrics.slice(-MAX_BARS));
 
 	// Default max values: CPU 100%, RAM 512MB
@@ -69,89 +69,78 @@
 </script>
 
 <div class="card" class:selected onclick={onClick} onkeydown={(e) => e.key === 'Enter' && onClick()} role="button" tabindex="0">
-	<div class="header">
-		<span class="name">{process.config.name}</span>
-		{#if process.config.type === 'server'}
-			<Server size={14} class="type-icon server" />
-		{:else}
-			<Cog size={14} class="type-icon job" />
-		{/if}
-	</div>
-
-	{#if process.config.description}
-		<p class="description">{process.config.description}</p>
-	{/if}
-
-	{#if process.startedAt}
-	<div class="metrics" class:stopped={process.status !== 'running'}>
-		<div class="metric">
-			<div class="metric-header">
-				<span class="metric-label">CPU</span>
-				<span class="metric-value">{latestMetrics ? `${latestMetrics.cpu.toFixed(1)}%` : '-'}</span>
-			</div>
-			<div class="chart">
-				{#each Array(MAX_BARS) as _, i}
-					{@const metric = recentMetrics[i - (MAX_BARS - recentMetrics.length)]}
-					<div
-						class="bar cpu"
-						style="height: {metric ? Math.min((metric.cpu / CPU_MAX) * 100, 100) : 0}%"
-					></div>
-				{/each}
-			</div>
+	<div class="row">
+		<div class="col-name">
+			<div class="status-dot" class:running={process.status === 'running'} class:error={process.status === 'error'}></div>
+			{#if process.config.type === 'server'}
+				<Server size={14} class="type-icon server" />
+			{:else}
+				<Cog size={14} class="type-icon job" />
+			{/if}
+			<span class="name">{process.config.name}</span>
 		</div>
-		<div class="metric">
-			<div class="metric-header">
-				<span class="metric-label">RAM</span>
-				<span class="metric-value">{latestMetrics ? formatMemory(latestMetrics.memory) : '-'}</span>
-			</div>
-			<div class="chart">
-				{#each Array(MAX_BARS) as _, i}
-					{@const metric = recentMetrics[i - (MAX_BARS - recentMetrics.length)]}
-					<div
-						class="bar ram"
-						style="height: {metric ? Math.min((metric.memory / RAM_MAX) * 100, 100) : 0}%"
-					></div>
-				{/each}
-			</div>
-		</div>
-	</div>
-	{/if}
 
-	<div class="footer">
-		<div class="status-info">
+		<div class="col-port">
 			{#if process.port || process.config.port}
 				<span class="port">:{process.port || process.config.port}</span>
 			{/if}
 		</div>
-		<div class="footer-right">
+
+		<div class="col-metrics" class:stopped={process.status !== 'running'}>
+			<div class="metric">
+				<span class="metric-value">{latestMetrics ? `${latestMetrics.cpu.toFixed(0)}%` : '-'}</span>
+				<div class="chart">
+					{#each Array(MAX_BARS) as _, i}
+						{@const metric = recentMetrics[i - (MAX_BARS - recentMetrics.length)]}
+						<div
+							class="bar cpu"
+							style="height: {metric ? Math.min((metric.cpu / CPU_MAX) * 100, 100) : 0}%"
+						></div>
+					{/each}
+				</div>
+			</div>
+			<div class="metric">
+				<span class="metric-value">{latestMetrics ? formatMemory(latestMetrics.memory) : '-'}</span>
+				<div class="chart">
+					{#each Array(MAX_BARS) as _, i}
+						{@const metric = recentMetrics[i - (MAX_BARS - recentMetrics.length)]}
+						<div
+							class="bar ram"
+							style="height: {metric ? Math.min((metric.memory / RAM_MAX) * 100, 100) : 0}%"
+						></div>
+					{/each}
+				</div>
+			</div>
+		</div>
+
+		<div class="col-status">
 			{#if process.status === 'error'}
 				<span class="status-text">error</span>
 			{/if}
 			{#if uptime}
 				<span class="uptime" class:running={process.status === 'running'} class:stopped={process.status !== 'running'}>{uptime}</span>
 			{/if}
+		</div>
+
+		<div class="col-action">
 			{#if process.status === 'running'}
 				<Button variant="danger" onclick={handleStop}>Stop</Button>
 			{:else}
 				<Button onclick={handleStart}>Start</Button>
 			{/if}
-			<div class="status-dot" class:running={process.status === 'running'} class:error={process.status === 'error'}></div>
 		</div>
 	</div>
 </div>
 
 <style>
 	.card {
-		display: flex;
-		flex-direction: column;
 		width: 100%;
-		padding: 12px;
-		margin-bottom: 8px;
+		padding: 10px 12px;
+		margin-bottom: 4px;
 		background: #252525;
 		border: 1px solid #333;
 		border-radius: 8px;
 		cursor: pointer;
-		text-align: left;
 		transition: all 0.15s ease;
 	}
 
@@ -164,10 +153,48 @@
 		background: #1e3a5f;
 	}
 
-	.header {
+	.row {
 		display: flex;
 		align-items: center;
 		gap: 8px;
+	}
+
+	.col-name {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+	}
+
+	.col-port {
+		width: 45px;
+		flex-shrink: 0;
+		text-align: right;
+	}
+
+	.col-metrics {
+		display: flex;
+		gap: 12px;
+	}
+
+	.col-metrics.stopped {
+		opacity: 0.5;
+	}
+
+	.col-status {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		width: 55px;
+		flex-shrink: 0;
+		justify-content: flex-end;
+	}
+
+	.col-action {
+		width: 52px;
+		flex-shrink: 0;
 	}
 
 	.status-dot {
@@ -187,10 +214,12 @@
 	}
 
 	.name {
-		flex: 1;
 		font-weight: 500;
 		color: #fff;
-		font-size: 14px;
+		font-size: 13px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.port {
@@ -211,47 +240,46 @@
 		color: #f59e0b;
 	}
 
-	.description {
-		margin: 8px 0 0 0;
-		font-size: 12px;
-		color: #888;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+	.uptime {
+		font-size: 11px;
+		flex-shrink: 0;
+		text-align: right;
 	}
 
-	.metrics {
-		display: flex;
-		gap: 12px;
-		margin-top: 10px;
+	.uptime.running {
+		color: #22c55e;
 	}
 
-	.metrics.stopped {
-		opacity: 0.7;
+	.uptime.stopped {
+		color: #666;
+	}
+
+	.status-text {
+		font-size: 11px;
+		color: #ef4444;
+		text-transform: capitalize;
 	}
 
 	.metric {
-		flex: 1;
-	}
-
-	.metric-header {
 		display: flex;
-		justify-content: space-between;
-		margin-bottom: 4px;
-	}
-
-	.metric-label {
-		font-size: 10px;
-		color: #666;
+		align-items: center;
+		gap: 4px;
+		flex: 1;
+		min-width: 0;
 	}
 
 	.metric-value {
 		font-size: 10px;
 		color: #888;
+		width: 35px;
+		flex-shrink: 0;
+		text-align: right;
 	}
 
 	.chart {
-		height: 20px;
+		height: 18px;
+		width: 60px;
+		flex-shrink: 0;
 		background: #1a1a1a;
 		border-radius: 2px;
 		display: flex;
@@ -259,10 +287,12 @@
 		justify-content: flex-end;
 		gap: 1px;
 		padding: 2px;
+		overflow: hidden;
 	}
 
 	.bar {
 		flex: 0 0 2px;
+		min-width: 0;
 		border-radius: 1px;
 		transition: height 0.3s ease;
 	}
@@ -274,43 +304,4 @@
 	.bar.ram {
 		background: #22c55e;
 	}
-
-	.footer {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-top: 10px;
-	}
-
-	.status-info {
-		display: flex;
-		gap: 12px;
-		font-size: 11px;
-		color: #666;
-	}
-
-	.uptime {
-		font-size: 10px;
-	}
-
-	.uptime.running {
-		color: #22c55e;
-	}
-
-	.uptime.stopped {
-		color: #666;
-	}
-
-	.footer-right {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-
-	.status-text {
-		font-size: 11px;
-		color: #666;
-		text-transform: capitalize;
-	}
-
 </style>
