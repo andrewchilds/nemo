@@ -1,13 +1,21 @@
 import { writable, get } from 'svelte/store';
-import type { ProcessState, ProcessConfig } from '$lib/types';
+import type { ProcessState, ProcessConfig, Category } from '$lib/types';
 
 export const processes = writable<ProcessState[]>([]);
+export const categories = writable<Category[]>([]);
 export const selectedProcessId = writable<string | null>(null);
 
 export async function loadProcesses() {
 	if (typeof window !== 'undefined' && window.nemo) {
 		const states = await window.nemo.listProcesses();
 		processes.set(states);
+	}
+}
+
+export async function loadCategories() {
+	if (typeof window !== 'undefined' && window.nemo) {
+		const cats = await window.nemo.listCategories();
+		categories.set(cats);
 	}
 }
 
@@ -44,6 +52,39 @@ export async function reorderProcesses(orderedIds: string[]) {
 			return orderedIds
 				.map((id) => current.find((p) => p.config.id === id))
 				.filter((p): p is ProcessState => p !== undefined);
+		});
+	}
+}
+
+export async function addCategory(category: Category) {
+	if (typeof window !== 'undefined' && window.nemo) {
+		await window.nemo.addCategory(category);
+		await loadCategories();
+	}
+}
+
+export async function updateCategory(category: Category) {
+	if (typeof window !== 'undefined' && window.nemo) {
+		await window.nemo.updateCategory(category);
+		await loadCategories();
+	}
+}
+
+export async function deleteCategory(id: string) {
+	if (typeof window !== 'undefined' && window.nemo) {
+		await window.nemo.deleteCategory(id);
+		await loadCategories();
+		await loadProcesses(); // Reload processes since categoryId may have been cleared
+	}
+}
+
+export async function reorderCategories(orderedIds: string[]) {
+	if (typeof window !== 'undefined' && window.nemo) {
+		await window.nemo.reorderCategories(orderedIds);
+		categories.update((current) => {
+			return orderedIds
+				.map((id) => current.find((c) => c.id === id))
+				.filter((c): c is Category => c !== undefined);
 		});
 	}
 }

@@ -1,27 +1,35 @@
 <script lang="ts">
 	import { onMount, onDestroy } from "svelte";
 	import { get } from "svelte/store";
-	import type { ProcessConfig } from "$lib/types";
+	import type { ProcessConfig, Category } from "$lib/types";
 	import {
 		processes,
+		categories,
 		selectedProcessId,
 		loadProcesses,
+		loadCategories,
 		setupProcessListeners,
 		addProcess,
-		updateProcess
+		updateProcess,
+		addCategory,
+		updateCategory
 	} from "$lib/stores/processes";
 	import ProcessList from "$lib/components/ProcessList.svelte";
 	import ProcessDetail from "$lib/components/ProcessDetail.svelte";
 	import ProcessForm from "$lib/components/ProcessForm.svelte";
+	import CategoryForm from "$lib/components/CategoryForm.svelte";
 
-	let showForm = $state(false);
+	let showProcessForm = $state(false);
+	let showCategoryForm = $state(false);
 	let editingProcess: ProcessConfig | null = $state(null);
+	let editingCategory: Category | null = $state(null);
 	let cleanup: (() => void) | undefined;
 
 	let selectedProcess = $derived($processes.find((p) => p.config.id === $selectedProcessId) || null);
 
 	onMount(async () => {
 		await loadProcesses();
+		await loadCategories();
 		cleanup = setupProcessListeners();
 
 		if (!get(selectedProcessId) && get(processes).length > 0) {
@@ -33,9 +41,14 @@
 		cleanup?.();
 	});
 
-	function handleAdd() {
+	function handleAddProcess() {
 		editingProcess = null;
-		showForm = true;
+		showProcessForm = true;
+	}
+
+	function handleAddCategory() {
+		editingCategory = null;
+		showCategoryForm = true;
 	}
 
 	let detectedPort: number | undefined = $state(undefined);
@@ -44,23 +57,44 @@
 		if (selectedProcess) {
 			editingProcess = selectedProcess.config;
 			detectedPort = selectedProcess.port;
-			showForm = true;
+			showProcessForm = true;
 		}
 	}
 
-	function handleSave(config: ProcessConfig) {
+	function handleEditCategory(category: Category) {
+		editingCategory = category;
+		showCategoryForm = true;
+	}
+
+	function handleSaveProcess(config: ProcessConfig) {
 		if (editingProcess) {
 			updateProcess(config);
 		} else {
 			addProcess(config);
 		}
-		showForm = false;
+		showProcessForm = false;
 		editingProcess = null;
 		selectedProcessId.set(config.id);
 	}
 
-	function handleCancel() {
-		showForm = false;
+	function handleSaveCategory(category: Category) {
+		if (editingCategory) {
+			updateCategory(category);
+		} else {
+			addCategory(category);
+		}
+		showCategoryForm = false;
+		editingCategory = null;
+	}
+
+	function handleCancelProcess() {
+		showProcessForm = false;
+		editingProcess = null;
+	}
+
+	function handleCancelCategory() {
+		showCategoryForm = false;
+		editingCategory = null;
 	}
 </script>
 
@@ -71,7 +105,13 @@
 <div class="titlebar"></div>
 <div class="app">
 	<aside class="sidebar">
-		<ProcessList processes={$processes} onAdd={handleAdd} />
+		<ProcessList
+			processes={$processes}
+			categories={$categories}
+			onAddProcess={handleAddProcess}
+			onAddCategory={handleAddCategory}
+			onEditCategory={handleEditCategory}
+		/>
 	</aside>
 	<main class="main">
 		{#if selectedProcess}
@@ -82,14 +122,28 @@
 			<div class="empty">
 				<h2>No process selected</h2>
 				<p>Select a process from the sidebar or add a new one</p>
-				<button onclick={handleAdd}>Add Process</button>
+				<button onclick={handleAddProcess}>Add Process</button>
 			</div>
 		{/if}
 	</main>
 </div>
 
-{#if showForm}
-	<ProcessForm process={editingProcess} {detectedPort} onSave={handleSave} onCancel={handleCancel} />
+{#if showProcessForm}
+	<ProcessForm
+		process={editingProcess}
+		categories={$categories}
+		{detectedPort}
+		onSave={handleSaveProcess}
+		onCancel={handleCancelProcess}
+	/>
+{/if}
+
+{#if showCategoryForm}
+	<CategoryForm
+		category={editingCategory}
+		onSave={handleSaveCategory}
+		onCancel={handleCancelCategory}
+	/>
 {/if}
 
 <style>

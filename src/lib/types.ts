@@ -1,3 +1,9 @@
+export interface Category {
+	id: string;
+	name: string;
+	collapsed?: boolean;
+}
+
 export interface ProcessConfig {
 	id: string;
 	name: string;
@@ -7,6 +13,7 @@ export interface ProcessConfig {
 	type: 'server' | 'job';
 	autoRestart?: boolean;
 	port?: number;
+	categoryId?: string;
 }
 
 export interface ProcessMetric {
@@ -51,6 +58,12 @@ export interface NemoAPI {
 	onProcessOutput: (callback: (id: string, data: string) => void) => () => void;
 	onProcessExit: (callback: (id: string, exitCode: number) => void) => () => void;
 	onMetricsUpdate: (callback: (states: ProcessState[]) => void) => () => void;
+	// Categories
+	listCategories: () => Promise<Category[]>;
+	addCategory: (category: Category) => Promise<{ success: boolean }>;
+	updateCategory: (category: Category) => Promise<{ success: boolean }>;
+	deleteCategory: (id: string) => Promise<{ success: boolean }>;
+	reorderCategories: (orderedIds: string[]) => Promise<{ success: boolean }>;
 }
 
 declare global {

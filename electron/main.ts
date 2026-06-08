@@ -9,6 +9,12 @@ import pidusage from 'pidusage';
 const isDev = process.env.NODE_ENV === 'development';
 const loadURL = serve({ directory: 'build' });
 
+interface Category {
+	id: string;
+	name: string;
+	collapsed?: boolean;
+}
+
 interface ProcessConfig {
 	id: string;
 	name: string;
@@ -18,6 +24,7 @@ interface ProcessConfig {
 	type: 'server' | 'job';
 	autoRestart?: boolean;
 	port?: number;
+	categoryId?: string;
 }
 
 interface ProcessState {
@@ -42,6 +49,7 @@ interface ManagedProcess {
 
 const DATA_DIR = path.join(app.getPath('userData'), 'nemo-data');
 const CONFIG_FILE = path.join(DATA_DIR, 'processes.json');
+const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const METRICS_FILE = path.join(DATA_DIR, 'metrics.json');
 const PORT_HISTORY_FILE = path.join(DATA_DIR, 'port-history.json');
 
@@ -65,6 +73,21 @@ function loadProcessConfigs(): ProcessConfig[] {
 
 function saveProcessConfigs(configs: ProcessConfig[]) {
 	fs.writeFileSync(CONFIG_FILE, JSON.stringify(configs, null, 2));
+}
+
+function loadCategories(): Category[] {
+	try {
+		if (fs.existsSync(CATEGORIES_FILE)) {
+			return JSON.parse(fs.readFileSync(CATEGORIES_FILE, 'utf-8'));
+		}
+	} catch (e) {
+		console.error('Failed to load categories:', e);
+	}
+	return [];
+}
+
+function saveCategories(categories: Category[]) {
+	fs.writeFileSync(CATEGORIES_FILE, JSON.stringify(categories, null, 2));
 }
 
 function loadMetricsHistory(): Record<string, ProcessState['metrics']> {
@@ -411,6 +434,56 @@ ipcMain.handle('process:reorder', (_event, orderedIds: string[]) => {
 		.map((id) => configs.find((c) => c.id === id))
 		.filter((c): c is ProcessConfig => c !== undefined);
 	saveProcessConfigs(reordered);
+	return { success: true };
+});
+
+// Category handlers
+ipcMain.handle('category:list', () => {
+	return loadCategories();
+});
+
+ipcMain.handle('category:add', (_event, category: Category) => {
+	const categories = loadCategories();
+	categories.push(category);
+	saveCategories(categories);
+	return { success: true };
+});
+
+ipcMain.handle('category:update', (_event, category: Category) => {
+	const categories = loadCategories();
+	const index = categories.findIndex((c) => c.id === category.id);
+	if (index >= 0) {
+		categories[index] = category;
+		saveCategories(categories);
+	}
+	return { success: true };
+});
+
+ipcMain.handle('category:delete', (_event, id: string) => {
+	const categories = loadCategories();
+	const filtered = categories.filter((c) => c.id !== id);
+	saveCategories(filtered);
+	// Remove categoryId from processes that were in this category
+	const configs = loadProcessConfigs();
+	let modified = false;
+	for (const config of configs) {
+		if (config.categoryId === id) {
+			config.categoryId = undefined;
+			modified = true;
+		}
+	}
+	if (modified) {
+		saveProcessConfigs(configs);
+	}
+	return { success: true };
+});
+
+ipcMain.handle('category:reorder', (_event, orderedIds: string[]) => {
+	const categories = loadCategories();
+	const reordered = orderedIds
+		.map((id) => categories.find((c) => c.id === id))
+		.filter((c): c is Category => c !== undefined);
+	saveCategories(reordered);
 	return { success: true };
 });
 

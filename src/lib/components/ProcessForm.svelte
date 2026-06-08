@@ -1,16 +1,17 @@
 <script lang="ts">
-	import type { ProcessConfig } from '$lib/types';
+	import type { ProcessConfig, Category } from '$lib/types';
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
 
 	interface Props {
 		process: ProcessConfig | null;
+		categories: Category[];
 		detectedPort?: number;
 		onSave: (config: ProcessConfig) => void;
 		onCancel: () => void;
 	}
 
-	let { process, detectedPort, onSave, onCancel }: Props = $props();
+	let { process, categories, detectedPort, onSave, onCancel }: Props = $props();
 
 	let name = $state(process?.name || '');
 	let description = $state(process?.description || '');
@@ -19,6 +20,7 @@
 	let type: 'server' | 'job' = $state(process?.type || 'server');
 	let autoRestart = $state(process?.autoRestart ?? false);
 	let port: number | null = $state(process?.port ?? detectedPort ?? null);
+	let categoryId: string = $state(process?.categoryId || '');
 
 	function generateId(): string {
 		return `proc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -33,7 +35,8 @@
 			cwd: cwd.trim(),
 			type,
 			autoRestart,
-			port: type === 'server' && port ? port : undefined
+			port: type === 'server' && port ? port : undefined,
+			categoryId: categoryId || undefined
 		};
 		onSave(config);
 	}
@@ -68,6 +71,18 @@
 				<option value="job">Job (one-time task)</option>
 			</select>
 		</label>
+
+		{#if categories.length > 0}
+			<label>
+				<span>Category (optional)</span>
+				<select bind:value={categoryId}>
+					<option value="">No category</option>
+					{#each categories as cat (cat.id)}
+						<option value={cat.id}>{cat.name}</option>
+					{/each}
+				</select>
+			</label>
+		{/if}
 
 		{#if type === 'server'}
 			<label>

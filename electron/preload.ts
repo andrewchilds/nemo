@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+export interface Category {
+	id: string;
+	name: string;
+	collapsed?: boolean;
+}
+
 export interface ProcessConfig {
 	id: string;
 	name: string;
@@ -8,6 +14,7 @@ export interface ProcessConfig {
 	cwd: string;
 	type: 'server' | 'job';
 	autoRestart?: boolean;
+	categoryId?: string;
 }
 
 export interface ProcessState {
@@ -78,7 +85,18 @@ const api = {
 		const handler = (_event: Electron.IpcRendererEvent, states: ProcessState[]) => callback(states);
 		ipcRenderer.on('metrics:update', handler);
 		return () => ipcRenderer.removeListener('metrics:update', handler);
-	}
+	},
+
+	// Categories
+	listCategories: (): Promise<Category[]> => ipcRenderer.invoke('category:list'),
+	addCategory: (category: Category): Promise<{ success: boolean }> =>
+		ipcRenderer.invoke('category:add', category),
+	updateCategory: (category: Category): Promise<{ success: boolean }> =>
+		ipcRenderer.invoke('category:update', category),
+	deleteCategory: (id: string): Promise<{ success: boolean }> =>
+		ipcRenderer.invoke('category:delete', id),
+	reorderCategories: (orderedIds: string[]): Promise<{ success: boolean }> =>
+		ipcRenderer.invoke('category:reorder', orderedIds)
 };
 
 contextBridge.exposeInMainWorld('nemo', api);
