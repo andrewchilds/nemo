@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
+	import type { Terminal as XtermTerminal } from 'xterm';
+	import type { FitAddon as XtermFitAddon } from 'xterm-addon-fit';
 
 	interface Props {
 		processId: string;
@@ -10,17 +12,19 @@
 	let { processId, running }: Props = $props();
 
 	let terminalContainer: HTMLDivElement;
-	let terminal: any = null;
-	let fitAddon: any = null;
+	let terminal: XtermTerminal | null = null;
+	let fitAddon: XtermFitAddon | null = null;
 	let unsubscribe: (() => void) | null = null;
+	let resizeObserver: ResizeObserver | null = null;
+	let destroyed = false;
 
-	onMount(async () => {
-		if (!browser) return;
-
+	async function initializeTerminal() {
 		const { Terminal } = await import('xterm');
 		const { FitAddon } = await import('xterm-addon-fit');
 
-		terminal = new Terminal({
+		if (destroyed) return;
+
+		const nextTerminal = new Terminal({
 			theme: {
 				background: '#0d0d0d',
 				foreground: '#e5e5e5',
@@ -43,28 +47,31 @@
 			cursorStyle: 'bar'
 		});
 
-		fitAddon = new FitAddon();
-		terminal.loadAddon(fitAddon);
-		terminal.open(terminalContainer);
+		const nextFitAddon = new FitAddon();
+		terminal = nextTerminal;
+		fitAddon = nextFitAddon;
+		nextTerminal.loadAddon(nextFitAddon);
+		nextTerminal.open(terminalContainer);
 
 		setTimeout(() => {
-			fitAddon.fit();
+			if (destroyed) return;
+			nextFitAddon.fit();
 			if (window.nemo) {
-				window.nemo.resize(processId, terminal.cols, terminal.rows);
+				void window.nemo.resize(processId, nextTerminal.cols, nextTerminal.rows);
 			}
 		}, 100);
 
 		// Load existing output buffer
 		if (window.nemo) {
 			const buffer = await window.nemo.getOutputBuffer(processId);
-			if (buffer && terminal) {
-				terminal.write(buffer);
+			if (buffer && !destroyed) {
+				nextTerminal.write(buffer);
 			}
 		}
 
-		terminal.onData((data: string) => {
+		nextTerminal.onData((data: string) => {
 			if (running && window.nemo) {
-				window.nemo.sendInput(processId, data);
+				void window.nemo.sendInput(processId, data);
 			}
 		});
 
@@ -76,22 +83,25 @@
 			});
 		}
 
-		const resizeObserver = new ResizeObserver(() => {
-			if (fitAddon) {
+		resizeObserver = new ResizeObserver(() => {
+			if (fitAddon && terminal) {
 				fitAddon.fit();
-				if (window.nemo && terminal) {
-					window.nemo.resize(processId, terminal.cols, terminal.rows);
+				if (window.nemo) {
+					void window.nemo.resize(processId, terminal.cols, terminal.rows);
 				}
 			}
 		});
 		resizeObserver.observe(terminalContainer);
+	}
 
-		return () => {
-			resizeObserver.disconnect();
-		};
+	onMount(() => {
+		if (!browser) return;
+		void initializeTerminal();
 	});
 
 	onDestroy(() => {
+		destroyed = true;
+		resizeObserver?.disconnect();
 		if (unsubscribe) unsubscribe();
 		if (terminal) terminal.dispose();
 	});

@@ -33,6 +33,7 @@
 
 	// Get last 20 data points for charts (~1.5 minutes at 5s intervals)
 	const MAX_BARS = 20;
+	const chartBarIndexes = Array.from({ length: MAX_BARS }, (_value, index) => index);
 	let recentMetrics = $derived(process.metrics.slice(-MAX_BARS));
 
 	// Default max values: CPU 100%, RAM 512MB
@@ -90,7 +91,7 @@
 			<div class="metric">
 				<span class="metric-value">{latestMetrics ? `${latestMetrics.cpu.toFixed(0)}%` : '-'}</span>
 				<div class="chart">
-					{#each Array(MAX_BARS) as _, i}
+						{#each chartBarIndexes as i (i)}
 						{@const metric = recentMetrics[i - (MAX_BARS - recentMetrics.length)]}
 						<div
 							class="bar cpu"
@@ -102,7 +103,7 @@
 			<div class="metric">
 				<span class="metric-value">{latestMetrics ? formatMemory(latestMetrics.memory) : '-'}</span>
 				<div class="chart">
-					{#each Array(MAX_BARS) as _, i}
+						{#each chartBarIndexes as i (i)}
 						{@const metric = recentMetrics[i - (MAX_BARS - recentMetrics.length)]}
 						<div
 							class="bar ram"

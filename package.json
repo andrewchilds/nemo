@@ -67,6 +67,15 @@
 		],
 		"mac": {
 			"category": "public.app-category.developer-tools",
+			"icon": "resources/icon.icns",
+			"notarize": false,
+			"extendInfo": {
+				"NSDesktopFolderUsageDescription": "Nemo runs local development commands that may read or write project files on your Desktop.",
+				"NSDocumentsFolderUsageDescription": "Nemo runs local development commands that may read or write project files in your Documents folder.",
+				"NSDownloadsFolderUsageDescription": "Nemo runs local development commands that may read or write project files in your Downloads folder.",
+				"NSNetworkVolumesUsageDescription": "Nemo runs local development commands that may read or write project files on network volumes.",
+				"NSRemovableVolumesUsageDescription": "Nemo runs local development commands that may read or write project files on external drives."
+			},
 			"target": [
 				"dmg",
 				"zip"

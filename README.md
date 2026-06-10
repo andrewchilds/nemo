@@ -36,6 +36,16 @@ bun run dist
 
 This creates distributable packages in the `release/` directory.
 
+### Launching on macOS without a terminal
+
+```bash
+bun run dist:mac
+```
+
+This creates a double-clickable `Nemo.app` under `release/`. Open it from Finder or drag it into `/Applications`. When Nemo is running, macOS shows a menu bar item with the number of running server processes.
+
+If macOS blocks a task from writing to a folder or drive, grant Nemo access in **System Settings > Privacy & Security > Files and Folders**. For projects on external drives, network volumes, or other protected locations, grant Nemo **Full Disk Access** in the same Privacy & Security section.
+
 ## Data Storage
 
 All data is stored in JSON files in the Electron user data directory:

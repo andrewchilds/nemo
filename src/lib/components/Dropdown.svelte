@@ -42,7 +42,7 @@
 
 	{#if open}
 		<div class="menu">
-			{#each items as item}
+			{#each items as item, index (`${item.label}-${index}`)}
 				{#if item.separator}
 					<div class="separator"></div>
 				{/if}

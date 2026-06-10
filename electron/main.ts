@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray, type MenuItemConstructorOptions } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { execSync } from 'child_process';
@@ -8,6 +8,17 @@ import pidusage from 'pidusage';
 
 const isDev = process.env.NODE_ENV === 'development';
 const loadURL = serve({ directory: 'build' });
+const ANSI_COLOR_PATTERN = new RegExp(String.raw`\x1b\[[0-9;]*m`, 'g');
+const MACOS_DEFAULT_PATH_SEGMENTS = [
+	'/opt/homebrew/bin',
+	'/opt/homebrew/sbin',
+	'/usr/local/bin',
+	'/usr/local/sbin',
+	'/usr/bin',
+	'/bin',
+	'/usr/sbin',
+	'/sbin'
+];
 
 interface Category {
 	id: string;
@@ -55,6 +66,8 @@ const PORT_HISTORY_FILE = path.join(DATA_DIR, 'port-history.json');
 
 const processes = new Map<string, ManagedProcess>();
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let isQuitting = false;
 
 function ensureDataDirs() {
 	if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -135,9 +148,117 @@ function recordPortForProcess(processId: string, port: number) {
 	}
 }
 
-function getKnownPorts(): number[] {
-	const history = loadPortHistory();
-	return Object.values(history);
+function createTrayIcon() {
+	const svg = `
+		<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
+			<path fill="#000" d="M3 4.5A2.5 2.5 0 0 1 5.5 2h7A2.5 2.5 0 0 1 15 4.5v9a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 3 13.5v-9Zm3 1A1.5 1.5 0 1 0 6 8.5a1.5 1.5 0 0 0 0-3Zm0 4A1.5 1.5 0 1 0 6 12.5a1.5 1.5 0 0 0 0-3Zm4-3.5a1 1 0 1 0 0 2h2a1 1 0 1 0 0-2h-2Zm0 4a1 1 0 1 0 0 2h2a1 1 0 1 0 0-2h-2Z"/>
+		</svg>
+	`;
+	const icon = nativeImage.createFromDataURL(
+		`data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+	);
+	icon.setTemplateImage(true);
+	return icon;
+}
+
+function getRunningServerProcesses(): ManagedProcess[] {
+	return Array.from(processes.values()).filter((managed) => (
+		managed.state.config.type === 'server' && managed.state.status === 'running'
+	));
+}
+
+function showMainWindow() {
+	if (!mainWindow || mainWindow.isDestroyed()) {
+		createWindow();
+		return;
+	}
+	mainWindow.show();
+	if (process.platform === 'darwin') {
+		app.dock?.show();
+	}
+	mainWindow.focus();
+}
+
+function updateTray() {
+	if (process.platform !== 'darwin') return;
+
+	const runningServers = getRunningServerProcesses();
+	const totalServers = loadProcessConfigs().filter((config) => config.type === 'server').length;
+	const count = runningServers.length;
+	const serverLabel = count === 1 ? 'server' : 'servers';
+	const countLabel = count > 99 ? '99+' : String(count);
+	app.dock?.setBadge(count > 0 ? countLabel : '');
+
+	if (!tray) return;
+
+	const serverItems: MenuItemConstructorOptions[] = runningServers.map((managed) => {
+		const port = managed.state.port ?? managed.state.config.port;
+		return {
+			label: `${managed.state.config.name}${port ? ` :${port}` : ''}`,
+			enabled: false
+		};
+	});
+	const template: MenuItemConstructorOptions[] = [
+		{
+			label: `${count} of ${totalServers} ${totalServers === 1 ? 'server' : 'servers'} running`,
+			enabled: false
+		},
+		...(serverItems.length > 0
+			? [
+					{ type: 'separator' as const },
+					...serverItems
+				]
+			: []),
+		{ type: 'separator' },
+		{
+			label: mainWindow?.isVisible() ? 'Hide Nemo' : 'Show Nemo',
+			click: () => {
+				if (mainWindow?.isVisible()) {
+					mainWindow.hide();
+				} else {
+					showMainWindow();
+				}
+				updateTray();
+			}
+		},
+		{
+			label: 'Quit Nemo',
+			accelerator: 'Command+Q',
+			click: () => {
+				isQuitting = true;
+				app.quit();
+			}
+		}
+	];
+
+	tray.setImage(createTrayIcon());
+	tray.setTitle(countLabel);
+	tray.setToolTip(`Nemo: ${count} ${serverLabel} running`);
+	tray.setContextMenu(Menu.buildFromTemplate(template));
+}
+
+function createTray() {
+	if (process.platform !== 'darwin' || tray) return;
+
+	tray = new Tray(createTrayIcon());
+	tray.on('click', () => {
+		showMainWindow();
+		updateTray();
+	});
+	updateTray();
+}
+
+function getManagedProcessEnv(): NodeJS.ProcessEnv {
+	const existingPath = process.env.PATH?.split(path.delimiter).filter(Boolean) ?? [];
+	const pathSegments = process.platform === 'darwin'
+		? [...MACOS_DEFAULT_PATH_SEGMENTS, ...existingPath]
+		: existingPath;
+
+	return {
+		...process.env,
+		PATH: Array.from(new Set(pathSegments)).join(path.delimiter),
+		TERM: 'xterm-256color'
+	};
 }
 
 function createWindow() {
@@ -153,6 +274,19 @@ function createWindow() {
 		},
 		titleBarStyle: 'hiddenInset',
 		trafficLightPosition: { x: 15, y: 10 }
+	});
+
+	mainWindow.on('close', (event) => {
+		if (process.platform === 'darwin' && !isQuitting) {
+			event.preventDefault();
+			mainWindow?.hide();
+			updateTray();
+		}
+	});
+
+	mainWindow.on('closed', () => {
+		mainWindow = null;
+		updateTray();
 	});
 
 	if (isDev) {
@@ -176,15 +310,18 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 	}
 
 	const shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/zsh';
+	const shellArgs = process.platform === 'win32'
+		? ['-Command', config.command]
+		: ['-l', '-i', '-c', config.command];
 
 	try {
-		// Use login shell (-l) to source shell profile and get proper PATH
-		const ptyProcess = pty.spawn(shell, ['-l', '-c', config.command], {
+		// Use an interactive login shell so Finder-launched builds can load shell-managed tools.
+		const ptyProcess = pty.spawn(shell, shellArgs, {
 			name: 'xterm-256color',
 			cols: 120,
 			rows: 30,
 			cwd: config.cwd,
-			env: { ...process.env, TERM: 'xterm-256color' }
+			env: getManagedProcessEnv()
 		});
 
 		const state: ProcessState = {
@@ -215,6 +352,7 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 					managed.state.port = detectedPort;
 					managed.state.config.port = detectedPort;
 					recordPortForProcess(config.id, detectedPort);
+					updateTray();
 				}
 			}
 			mainWindow?.webContents.send('process:output', config.id, data);
@@ -225,6 +363,7 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 			managed.state.pid = undefined;
 			managed.state.stoppedAt = Date.now();
 			mainWindow?.webContents.send('process:exit', config.id, exitCode);
+			updateTray();
 
 			if (config.autoRestart && config.type === 'server' && exitCode !== 0) {
 				setTimeout(() => startProcess(config), 3000);
@@ -232,6 +371,7 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 		});
 
 		processes.set(config.id, managed);
+		updateTray();
 		return managed;
 	} catch (e) {
 		console.error('Failed to start process:', e);
@@ -248,6 +388,7 @@ function stopProcess(id: string): boolean {
 		managed.state.status = 'stopped';
 		managed.state.pid = undefined;
 		managed.state.stoppedAt = Date.now();
+		updateTray();
 		return true;
 	} catch (e) {
 		console.error('Failed to stop process:', e);
@@ -257,7 +398,7 @@ function stopProcess(id: string): boolean {
 
 function detectPortFromOutput(output: string): number | undefined {
 	// Strip ANSI escape codes for cleaner matching
-	const cleanOutput = output.replace(/\x1b\[[0-9;]*m/g, '');
+	const cleanOutput = output.replace(ANSI_COLOR_PATTERN, '');
 
 	// Common patterns dev servers use to announce their port
 	const patterns = [
@@ -347,6 +488,7 @@ async function collectMetrics() {
 						managed.state.port = detectedPort;
 						managed.state.config.port = detectedPort;
 						recordPortForProcess(id, detectedPort);
+						updateTray();
 					}
 				}
 
@@ -363,6 +505,7 @@ async function collectMetrics() {
 
 	saveMetricsHistory(metricsHistory);
 	mainWindow?.webContents.send('metrics:update', getProcessStates());
+	updateTray();
 }
 
 function getProcessStates(): ProcessState[] {
@@ -393,6 +536,7 @@ ipcMain.handle('process:add', (_event, config: ProcessConfig) => {
 	const configs = loadProcessConfigs();
 	configs.push(config);
 	saveProcessConfigs(configs);
+	updateTray();
 	return { success: true };
 });
 
@@ -416,6 +560,7 @@ ipcMain.handle('process:update', (_event, config: ProcessConfig) => {
 			recordPortForProcess(config.id, config.port);
 		}
 	}
+	updateTray();
 	return { success: true };
 });
 
@@ -425,6 +570,7 @@ ipcMain.handle('process:delete', (_event, id: string) => {
 	const filtered = configs.filter((c) => c.id !== id);
 	saveProcessConfigs(filtered);
 	processes.delete(id);
+	updateTray();
 	return { success: true };
 });
 
@@ -434,6 +580,7 @@ ipcMain.handle('process:reorder', (_event, orderedIds: string[]) => {
 		.map((id) => configs.find((c) => c.id === id))
 		.filter((c): c is ProcessConfig => c !== undefined);
 	saveProcessConfigs(reordered);
+	updateTray();
 	return { success: true };
 });
 
@@ -633,8 +780,10 @@ ipcMain.handle('system:kill-process', async (_event, pid: number): Promise<{ suc
 app.whenReady().then(() => {
 	ensureDataDirs();
 	createWindow();
+	createTray();
 
 	setInterval(collectMetrics, 5000);
+	setInterval(updateTray, 2000);
 
 	app.on('activate', () => {
 		if (BrowserWindow.getAllWindows().length === 0) {
@@ -644,14 +793,18 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+	if (process.platform !== 'darwin') {
+		app.quit();
+	}
+});
+
+app.on('before-quit', () => {
+	isQuitting = true;
 	for (const [, managed] of processes) {
 		try {
 			managed.pty.kill();
 		} catch {
 			// Ignore
 		}
-	}
-	if (process.platform !== 'darwin') {
-		app.quit();
 	}
 });
