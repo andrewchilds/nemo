@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, Tray, type MenuItemConstructorOptions } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { execSync } from 'child_process';
@@ -148,22 +148,22 @@ function recordPortForProcess(processId: string, port: number) {
 	}
 }
 
-function createTrayIcon() {
+function createTrayStatusIcon(isRunning: boolean) {
+	const fill = isRunning ? '#30d158' : '#8e8e93';
 	const svg = `
 		<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
-			<path fill="#000" d="M3 4.5A2.5 2.5 0 0 1 5.5 2h7A2.5 2.5 0 0 1 15 4.5v9a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 3 13.5v-9Zm3 1A1.5 1.5 0 1 0 6 8.5a1.5 1.5 0 0 0 0-3Zm0 4A1.5 1.5 0 1 0 6 12.5a1.5 1.5 0 0 0 0-3Zm4-3.5a1 1 0 1 0 0 2h2a1 1 0 1 0 0-2h-2Zm0 4a1 1 0 1 0 0 2h2a1 1 0 1 0 0-2h-2Z"/>
+			<circle cx="9" cy="9" r="4.5" fill="${fill}"/>
 		</svg>
 	`;
 	const icon = nativeImage.createFromDataURL(
 		`data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
 	);
-	icon.setTemplateImage(true);
 	return icon;
 }
 
-function getRunningServerProcesses(): ManagedProcess[] {
+function getRunningProcesses(): ManagedProcess[] {
 	return Array.from(processes.values()).filter((managed) => (
-		managed.state.config.type === 'server' && managed.state.status === 'running'
+		managed.state.status === 'running'
 	));
 }
 
@@ -182,16 +182,16 @@ function showMainWindow() {
 function updateTray() {
 	if (process.platform !== 'darwin') return;
 
-	const runningServers = getRunningServerProcesses();
-	const totalServers = loadProcessConfigs().filter((config) => config.type === 'server').length;
-	const count = runningServers.length;
-	const serverLabel = count === 1 ? 'server' : 'servers';
+	const runningProcesses = getRunningProcesses();
+	const totalProcesses = loadProcessConfigs().length;
+	const count = runningProcesses.length;
+	const processLabel = count === 1 ? 'process' : 'processes';
 	const countLabel = count > 99 ? '99+' : String(count);
 	app.dock?.setBadge(count > 0 ? countLabel : '');
 
 	if (!tray) return;
 
-	const serverItems: MenuItemConstructorOptions[] = runningServers.map((managed) => {
+	const processItems: MenuItemConstructorOptions[] = runningProcesses.map((managed) => {
 		const port = managed.state.port ?? managed.state.config.port;
 		return {
 			label: `${managed.state.config.name}${port ? ` :${port}` : ''}`,
@@ -200,13 +200,13 @@ function updateTray() {
 	});
 	const template: MenuItemConstructorOptions[] = [
 		{
-			label: `${count} of ${totalServers} ${totalServers === 1 ? 'server' : 'servers'} running`,
+			label: `${count} of ${totalProcesses} ${totalProcesses === 1 ? 'process' : 'processes'} running`,
 			enabled: false
 		},
-		...(serverItems.length > 0
+		...(processItems.length > 0
 			? [
 					{ type: 'separator' as const },
-					...serverItems
+					...processItems
 				]
 			: []),
 		{ type: 'separator' },
@@ -231,16 +231,33 @@ function updateTray() {
 		}
 	];
 
-	tray.setImage(createTrayIcon());
+	tray.setImage(createTrayStatusIcon(count > 0));
 	tray.setTitle(countLabel);
-	tray.setToolTip(`Nemo: ${count} ${serverLabel} running`);
+	tray.setToolTip(`Nemo: ${count} ${processLabel} running`);
 	tray.setContextMenu(Menu.buildFromTemplate(template));
+}
+
+function showTaskFinishedNotification(config: ProcessConfig, exitCode: number) {
+	if (config.type !== 'job' || !Notification.isSupported()) return;
+
+	const succeeded = exitCode === 0;
+	const notification = new Notification({
+		title: succeeded ? 'Task finished' : 'Task failed',
+		body: `${config.name} ${succeeded ? 'completed successfully.' : `exited with code ${exitCode}.`}`,
+		silent: false
+	});
+
+	notification.on('click', () => {
+		showMainWindow();
+	});
+
+	notification.show();
 }
 
 function createTray() {
 	if (process.platform !== 'darwin' || tray) return;
 
-	tray = new Tray(createTrayIcon());
+	tray = new Tray(createTrayStatusIcon(false));
 	tray.on('click', () => {
 		showMainWindow();
 		updateTray();
@@ -362,6 +379,7 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 			managed.state.status = exitCode === 0 ? 'stopped' : 'error';
 			managed.state.pid = undefined;
 			managed.state.stoppedAt = Date.now();
+			showTaskFinishedNotification(config, exitCode);
 			mainWindow?.webContents.send('process:exit', config.id, exitCode);
 			updateTray();
 
