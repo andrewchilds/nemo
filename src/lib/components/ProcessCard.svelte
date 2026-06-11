@@ -71,8 +71,15 @@
 
 <div class="card" class:selected onclick={onClick} onkeydown={(e) => e.key === 'Enter' && onClick()} role="button" tabindex="0">
 	<div class="row">
-		<div class="col-name">
+		<div class="col-controls">
 			<div class="status-dot" class:running={process.status === 'running'} class:error={process.status === 'error'}></div>
+			{#if process.status === 'running'}
+				<Button variant="danger" onclick={handleStop}>Stop</Button>
+			{:else}
+				<Button onclick={handleStart}>Start</Button>
+			{/if}
+		</div>
+		<div class="col-name">
 			{#if process.config.type === 'server'}
 				<Server size={14} class="type-icon server" />
 			{:else}
@@ -123,13 +130,6 @@
 			{/if}
 		</div>
 
-		<div class="col-action">
-			{#if process.status === 'running'}
-				<Button variant="danger" onclick={handleStop}>Stop</Button>
-			{:else}
-				<Button onclick={handleStart}>Start</Button>
-			{/if}
-		</div>
 	</div>
 </div>
 
@@ -158,6 +158,13 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
+	}
+
+	.col-controls {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-shrink: 0;
 	}
 
 	.col-name {
@@ -191,11 +198,6 @@
 		width: 55px;
 		flex-shrink: 0;
 		justify-content: flex-end;
-	}
-
-	.col-action {
-		width: 52px;
-		flex-shrink: 0;
 	}
 
 	.status-dot {
