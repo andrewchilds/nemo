@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { ProcessState } from "$lib/types";
-	import { deleteProcess } from "$lib/stores/processes";
+	import { deleteProcess, categories } from "$lib/stores/processes";
+	import { resolveProcessDisplayCwd } from "$lib/paths";
 	import Terminal from "./Terminal.svelte";
 	import Dropdown from "./Dropdown.svelte";
 	import Badge from "./Badge.svelte";
@@ -15,6 +16,7 @@
 	let { process, onEdit }: Props = $props();
 
 	let showDeleteConfirm = $state(false);
+	const displayCwd = $derived(resolveProcessDisplayCwd(process.config, $categories));
 
 	async function handleDelete() {
 		await deleteProcess(process.config.id);
@@ -54,7 +56,7 @@
 		<div class="terminal-header">
 			<div class="path-tab">
 				<Folder size={14} />
-				<span class="path-text">{process.config.cwd}</span>
+				<span class="path-text" title={displayCwd}>{displayCwd}</span>
 			</div>
 			<code class="command">{process.config.command}</code>
 		</div>

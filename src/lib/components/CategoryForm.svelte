@@ -12,6 +12,7 @@
 	let { category, onSave, onCancel }: Props = $props();
 
 	let name = $state(category?.name || '');
+	let cwd = $state(category?.cwd || '');
 
 	function generateId(): string {
 		return `cat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -21,6 +22,7 @@
 		const cat: Category = {
 			id: category?.id || generateId(),
 			name: name.trim(),
+			cwd: cwd.trim() || undefined,
 			collapsed: category?.collapsed ?? false
 		};
 		onSave(cat);
@@ -32,6 +34,12 @@
 		<label>
 			<span>Name</span>
 			<input type="text" bind:value={name} placeholder="Category name" required />
+		</label>
+
+		<label>
+			<span>Directory (optional)</span>
+			<input type="text" bind:value={cwd} placeholder="/path/to/project" />
+			<small>Processes in this category can use a working directory relative to this path.</small>
 		</label>
 	</form>
 
@@ -73,5 +81,12 @@
 	input[type='text']:focus {
 		outline: none;
 		border-color: #3b82f6;
+	}
+
+	small {
+		display: block;
+		margin-top: 6px;
+		font-size: 12px;
+		color: #666;
 	}
 </style>

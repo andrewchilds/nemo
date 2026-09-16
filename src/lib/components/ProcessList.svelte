@@ -293,7 +293,7 @@
 							<ChevronDown size={14} />
 						{/if}
 						<FolderOpen size={14} />
-						<span class="category-name">{category.name}</span>
+						<span class="category-name" title={category.cwd || ''}>{category.name}</span>
 						<span class="category-count">({categoryProcesses.length})</span>
 					</div>
 					<div class="category-actions" onclick={(e) => e.stopPropagation()}>

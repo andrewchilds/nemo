@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ProcessConfig, Category } from '$lib/types';
+	import { resolveDisplayCwd } from '$lib/paths';
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
 
@@ -21,6 +22,9 @@
 	let autoRestart = $state(process?.autoRestart ?? false);
 	let port: number | null = $state(process?.port ?? detectedPort ?? null);
 	let categoryId: string = $state(process?.categoryId || '');
+
+	const categoryCwd = $derived(categories.find((c) => c.id === categoryId)?.cwd || '');
+	const resolvedCwd = $derived(resolveDisplayCwd(cwd, categoryCwd));
 
 	function generateId(): string {
 		return `proc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -59,19 +63,6 @@
 			<input type="text" bind:value={command} placeholder="npm run dev" required />
 		</label>
 
-		<label>
-			<span>Working Directory</span>
-			<input type="text" bind:value={cwd} placeholder="/path/to/project" required />
-		</label>
-
-		<label>
-			<span>Type</span>
-			<select bind:value={type}>
-				<option value="server">Server (long-running)</option>
-				<option value="job">Job (one-time task)</option>
-			</select>
-		</label>
-
 		{#if categories.length > 0}
 			<label>
 				<span>Category (optional)</span>
@@ -83,6 +74,27 @@
 				</select>
 			</label>
 		{/if}
+
+		<label>
+			<span>Working Directory{#if categoryCwd} (relative to category directory){/if}</span>
+			<input
+				type="text"
+				bind:value={cwd}
+				placeholder={categoryCwd ? 'Leave empty to use the category directory' : '/path/to/project'}
+				required={!categoryCwd}
+			/>
+			{#if categoryCwd}
+				<small class="resolved">Runs in <code>{resolvedCwd}</code></small>
+			{/if}
+		</label>
+
+		<label>
+			<span>Type</span>
+			<select bind:value={type}>
+				<option value="server">Server (long-running)</option>
+				<option value="job">Job (one-time task)</option>
+			</select>
+		</label>
 
 		{#if type === 'server'}
 			<label>
@@ -160,5 +172,18 @@
 
 	.checkbox span {
 		margin: 0;
+	}
+
+	.resolved {
+		display: block;
+		margin-top: 6px;
+		font-size: 12px;
+		color: #666;
+		word-break: break-all;
+	}
+
+	.resolved code {
+		color: #999;
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 	}
 </style>

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, Tray, type MenuItemConstructorOptions } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { execSync } from 'child_process';
 import serve from 'electron-serve';
 import * as pty from 'node-pty';
@@ -23,6 +24,7 @@ const MACOS_DEFAULT_PATH_SEGMENTS = [
 interface Category {
 	id: string;
 	name: string;
+	cwd?: string;
 	collapsed?: boolean;
 }
 
@@ -314,6 +316,25 @@ function createWindow() {
 	}
 }
 
+function expandHome(p: string): string {
+	if (p === '~') return os.homedir();
+	if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
+	return p;
+}
+
+// Resolve the directory a process should run in. An absolute cwd is used as-is;
+// a relative (or empty) cwd is resolved against the category's directory when it has one.
+function resolveProcessCwd(config: ProcessConfig): string {
+	const cwd = expandHome(config.cwd.trim());
+	if (path.isAbsolute(cwd)) return cwd;
+	const category = config.categoryId
+		? loadCategories().find((c) => c.id === config.categoryId)
+		: undefined;
+	const base = category?.cwd ? expandHome(category.cwd.trim()) : '';
+	if (base) return path.resolve(base, cwd);
+	return cwd ? path.resolve(os.homedir(), cwd) : os.homedir();
+}
+
 function startProcess(config: ProcessConfig): ManagedProcess | null {
 	if (processes.has(config.id)) {
 		const existing = processes.get(config.id)!;
@@ -337,7 +358,7 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 			name: 'xterm-256color',
 			cols: 120,
 			rows: 30,
-			cwd: config.cwd,
+			cwd: resolveProcessCwd(config),
 			env: getManagedProcessEnv()
 		});
 

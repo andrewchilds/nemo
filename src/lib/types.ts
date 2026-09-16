@@ -1,6 +1,8 @@
 export interface Category {
 	id: string;
 	name: string;
+	/** Base directory. Processes in this category resolve a relative `cwd` against it. */
+	cwd?: string;
 	collapsed?: boolean;
 }
 
@@ -9,6 +11,7 @@ export interface ProcessConfig {
 	name: string;
 	description: string;
 	command: string;
+	/** Absolute path, or a path relative to the category's directory (empty = the category directory itself). */
 	cwd: string;
 	type: 'server' | 'job';
 	autoRestart?: boolean;
