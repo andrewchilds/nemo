@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 
 	interface Props {
-		variant?: 'default' | 'blue' | 'green' | 'amber' | 'red';
+		variant?: 'default' | 'blue' | 'green' | 'amber' | 'red' | 'purple';
 		children: Snippet;
 	}
 
@@ -46,5 +46,10 @@
 	.red {
 		background: #450a0a;
 		color: #ef4444;
+	}
+
+	.purple {
+		background: #3b0764;
+		color: #c084fc;
 	}
 </style>

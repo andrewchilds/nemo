@@ -2,6 +2,7 @@
 	import type { ProcessState } from "$lib/types";
 	import { deleteProcess, categories } from "$lib/stores/processes";
 	import { resolveProcessDisplayCwd } from "$lib/paths";
+	import { describeSchedule } from "$lib/schedule";
 	import Terminal from "./Terminal.svelte";
 	import Dropdown from "./Dropdown.svelte";
 	import Badge from "./Badge.svelte";
@@ -17,6 +18,13 @@
 
 	let showDeleteConfirm = $state(false);
 	const displayCwd = $derived(resolveProcessDisplayCwd(process.config, $categories));
+	const schedule = $derived(process.config.type === "scheduled" ? process.config.schedule : undefined);
+	const nextRunLabel = $derived.by(() => {
+		if (!schedule || !process.nextRunAt || process.status === "running") return null;
+		const next = new Date(process.nextRunAt);
+		const time = next.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+		return next.toDateString() === new Date().toDateString() ? time : `tomorrow ${time}`;
+	});
 
 	async function handleDelete() {
 		await deleteProcess(process.config.id);
@@ -41,6 +49,12 @@
 				{/if}
 				{#if process.port}
 					<Badge variant="blue">:{process.port}</Badge>
+				{/if}
+				{#if schedule}
+					<Badge variant="purple">{describeSchedule(schedule)}</Badge>
+					{#if nextRunLabel}
+						<span class="next-run">Next run {nextRunLabel}</span>
+					{/if}
 				{/if}
 				<Dropdown items={dropdownItems}>
 					<MoreHorizontal size={18} />
@@ -111,6 +125,12 @@
 		margin: 0;
 		color: #888;
 		font-size: 13px;
+	}
+
+	.next-run {
+		font-size: 12px;
+		color: #888;
+		white-space: nowrap;
 	}
 
 	.terminal-container {

@@ -52,7 +52,8 @@ Run a single test file: `bun run test:unit -- src/lib/path/to/file.spec.ts`
 
 ### Process Types
 - **Servers**: Long-running processes with port detection and optional auto-restart
-- **Jobs**: One-off commands that run to completion
+- **Jobs**: One-off commands that run to completion; show a notification when they finish
+- **Scheduled**: Jobs run automatically on a schedule (`ProcessConfig.schedule`): every N minutes aligned to the local clock, or once a day at a local time. The main process checks due tasks every second (`runDueScheduledTasks`) and skips a run if the previous one is still going. Only daily tasks notify on completion. Schedule math lives in `src/lib/schedule.ts` and is mirrored in `electron/main.ts`.
 
 ### IPC Flow
 1. Renderer calls `window.nemo.*` methods

@@ -28,16 +28,23 @@ interface Category {
 	collapsed?: boolean;
 }
 
+type ProcessType = 'server' | 'job' | 'scheduled';
+
+type Schedule =
+	| { kind: 'interval'; minutes: number }
+	| { kind: 'daily'; time: string }; // "HH:MM" local time
+
 interface ProcessConfig {
 	id: string;
 	name: string;
 	description: string;
 	command: string;
 	cwd: string;
-	type: 'server' | 'job';
+	type: ProcessType;
 	autoRestart?: boolean;
 	port?: number;
 	categoryId?: string;
+	schedule?: Schedule;
 }
 
 interface ProcessState {
@@ -47,6 +54,7 @@ interface ProcessState {
 	port?: number;
 	startedAt?: number;
 	stoppedAt?: number;
+	nextRunAt?: number;
 	metrics: {
 		cpu: number;
 		memory: number;
@@ -67,6 +75,8 @@ const METRICS_FILE = path.join(DATA_DIR, 'metrics.json');
 const PORT_HISTORY_FILE = path.join(DATA_DIR, 'port-history.json');
 
 const processes = new Map<string, ManagedProcess>();
+// Scheduled task ID -> epoch ms of its next automatic run
+const nextRuns = new Map<string, number>();
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
@@ -239,8 +249,16 @@ function updateTray() {
 	tray.setContextMenu(Menu.buildFromTemplate(template));
 }
 
+// Jobs and once-a-day scheduled tasks notify when they finish. Interval tasks run
+// too often to be worth a notification each time.
+function shouldNotifyOnExit(config: ProcessConfig): boolean {
+	if (config.type === 'job') return true;
+	if (config.type === 'scheduled') return config.schedule?.kind === 'daily';
+	return false;
+}
+
 function showTaskFinishedNotification(config: ProcessConfig, exitCode: number) {
-	if (config.type !== 'job' || !Notification.isSupported()) return;
+	if (!shouldNotifyOnExit(config) || !Notification.isSupported()) return;
 
 	const succeeded = exitCode === 0;
 	const notification = new Notification({
@@ -335,14 +353,77 @@ function resolveProcessCwd(config: ProcessConfig): string {
 	return cwd ? path.resolve(os.homedir(), cwd) : os.homedir();
 }
 
+function parseTime(time: string): [number, number] {
+	const [h, m] = time.split(':').map((part) => parseInt(part, 10));
+	return [Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0];
+}
+
+// Epoch ms of the next run strictly after `now`, in local time. Interval schedules
+// align to the local clock (every 5 minutes runs at :00, :05, :10, ...).
+// Mirrors computeNextRun in src/lib/schedule.ts.
+function computeNextRun(schedule: Schedule, now: number = Date.now()): number {
+	if (schedule.kind === 'daily') {
+		const [hours, minutes] = parseTime(schedule.time);
+		const next = new Date(now);
+		next.setHours(hours, minutes, 0, 0);
+		if (next.getTime() <= now) {
+			next.setDate(next.getDate() + 1);
+			next.setHours(hours, minutes, 0, 0);
+		}
+		return next.getTime();
+	}
+
+	const intervalMs = Math.max(1, Math.round(schedule.minutes)) * 60_000;
+	const startOfDay = new Date(now);
+	startOfDay.setHours(0, 0, 0, 0);
+	const elapsed = now - startOfDay.getTime();
+	return startOfDay.getTime() + (Math.floor(elapsed / intervalMs) + 1) * intervalMs;
+}
+
+// (Re)compute the next run for one config, or drop it if it is no longer scheduled.
+function scheduleProcess(config: ProcessConfig) {
+	if (config.type === 'scheduled' && config.schedule) {
+		nextRuns.set(config.id, computeNextRun(config.schedule));
+	} else {
+		nextRuns.delete(config.id);
+	}
+}
+
+function scheduleAllProcesses() {
+	nextRuns.clear();
+	for (const config of loadProcessConfigs()) {
+		scheduleProcess(config);
+	}
+}
+
+// Called every second. Starts any scheduled task whose time has come, skipping a run
+// if the previous one is still going. After sleep/wake a missed task runs once.
+function runDueScheduledTasks() {
+	const now = Date.now();
+	let configs: ProcessConfig[] | null = null;
+
+	for (const [id, dueAt] of nextRuns) {
+		if (dueAt > now) continue;
+		configs ??= loadProcessConfigs();
+		const config = configs.find((c) => c.id === id);
+		if (!config || config.type !== 'scheduled' || !config.schedule) {
+			nextRuns.delete(id);
+			continue;
+		}
+		nextRuns.set(id, computeNextRun(config.schedule, now));
+		if (processes.get(id)?.state.status === 'running') continue;
+		startProcess(config);
+	}
+}
+
 function startProcess(config: ProcessConfig): ManagedProcess | null {
 	if (processes.has(config.id)) {
 		const existing = processes.get(config.id)!;
 		if (existing.state.status === 'running') {
 			return existing;
 		}
-		// For jobs, remove the old process entry so we start fresh
-		if (config.type === 'job') {
+		// For jobs and scheduled tasks, remove the old process entry so we start fresh
+		if (config.type !== 'server') {
 			processes.delete(config.id);
 		}
 	}
@@ -547,8 +628,13 @@ async function collectMetrics() {
 	updateTray();
 }
 
+function withNextRun(state: ProcessState): ProcessState {
+	state.nextRunAt = nextRuns.get(state.config.id);
+	return state;
+}
+
 function getProcessStates(): ProcessState[] {
-	return Array.from(processes.values()).map((p) => p.state);
+	return Array.from(processes.values()).map((p) => withNextRun(p.state));
 }
 
 // IPC Handlers
@@ -559,13 +645,13 @@ ipcMain.handle('process:list', () => {
 	for (const config of configs) {
 		const managed = processes.get(config.id);
 		if (managed) {
-			states.push(managed.state);
+			states.push(withNextRun(managed.state));
 		} else {
-			states.push({
+			states.push(withNextRun({
 				config,
 				status: 'stopped',
 				metrics: []
-			});
+			}));
 		}
 	}
 	return states;
@@ -575,6 +661,7 @@ ipcMain.handle('process:add', (_event, config: ProcessConfig) => {
 	const configs = loadProcessConfigs();
 	configs.push(config);
 	saveProcessConfigs(configs);
+	scheduleProcess(config);
 	updateTray();
 	return { success: true };
 });
@@ -583,8 +670,15 @@ ipcMain.handle('process:update', (_event, config: ProcessConfig) => {
 	const configs = loadProcessConfigs();
 	const index = configs.findIndex((c) => c.id === config.id);
 	if (index >= 0) {
+		const previous = configs[index];
 		configs[index] = config;
 		saveProcessConfigs(configs);
+		if (
+			previous.type !== config.type ||
+			JSON.stringify(previous.schedule) !== JSON.stringify(config.schedule)
+		) {
+			scheduleProcess(config);
+		}
 		const managed = processes.get(config.id);
 		if (managed) {
 			managed.state.config = config;
@@ -609,6 +703,7 @@ ipcMain.handle('process:delete', (_event, id: string) => {
 	const filtered = configs.filter((c) => c.id !== id);
 	saveProcessConfigs(filtered);
 	processes.delete(id);
+	nextRuns.delete(id);
 	updateTray();
 	return { success: true };
 });
@@ -821,8 +916,10 @@ app.whenReady().then(() => {
 	createWindow();
 	createTray();
 
+	scheduleAllProcesses();
 	setInterval(collectMetrics, 5000);
 	setInterval(updateTray, 2000);
+	setInterval(runDueScheduledTasks, 1000);
 
 	app.on('activate', () => {
 		if (BrowserWindow.getAllWindows().length === 0) {

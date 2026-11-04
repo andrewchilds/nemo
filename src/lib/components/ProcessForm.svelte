@@ -1,6 +1,7 @@
 <script lang="ts">
-	import type { ProcessConfig, Category } from '$lib/types';
+	import type { ProcessConfig, ProcessType, Schedule, Category } from '$lib/types';
 	import { resolveDisplayCwd } from '$lib/paths';
+	import { INTERVAL_OPTIONS } from '$lib/schedule';
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
 
@@ -18,10 +19,22 @@
 	let description = $state(process?.description || '');
 	let command = $state(process?.command || '');
 	let cwd = $state(process?.cwd || '');
-	let type: 'server' | 'job' = $state(process?.type || 'server');
+	let type: ProcessType = $state(process?.type || 'server');
 	let autoRestart = $state(process?.autoRestart ?? false);
 	let port: number | null = $state(process?.port ?? detectedPort ?? null);
 	let categoryId: string = $state(process?.categoryId || '');
+	// Schedule picker: "interval:<minutes>" or "daily"
+	let scheduleOption: string = $state(
+		process?.schedule?.kind === 'daily'
+			? 'daily'
+			: `interval:${process?.schedule?.kind === 'interval' ? process.schedule.minutes : 5}`
+	);
+	let dailyTime: string = $state(process?.schedule?.kind === 'daily' ? process.schedule.time : '09:00');
+
+	function buildSchedule(): Schedule {
+		if (scheduleOption === 'daily') return { kind: 'daily', time: dailyTime || '09:00' };
+		return { kind: 'interval', minutes: parseInt(scheduleOption.split(':')[1], 10) || 5 };
+	}
 
 	const categoryCwd = $derived(categories.find((c) => c.id === categoryId)?.cwd || '');
 	const resolvedCwd = $derived(resolveDisplayCwd(cwd, categoryCwd));
@@ -40,7 +53,8 @@
 			type,
 			autoRestart,
 			port: type === 'server' && port ? port : undefined,
-			categoryId: categoryId || undefined
+			categoryId: categoryId || undefined,
+			schedule: type === 'scheduled' ? buildSchedule() : undefined
 		};
 		onSave(config);
 	}
@@ -93,8 +107,30 @@
 			<select bind:value={type}>
 				<option value="server">Server (long-running)</option>
 				<option value="job">Job (one-time task)</option>
+				<option value="scheduled">Scheduled (runs on a schedule)</option>
 			</select>
 		</label>
+
+		{#if type === 'scheduled'}
+			<label>
+				<span>Schedule</span>
+				<select bind:value={scheduleOption}>
+					{#each INTERVAL_OPTIONS as minutes (minutes)}
+						<option value={`interval:${minutes}`}>
+							{minutes === 60 ? 'Every hour' : `Every ${minutes} minutes`}
+						</option>
+					{/each}
+					<option value="daily">Once a day at a specific time</option>
+				</select>
+			</label>
+
+			{#if scheduleOption === 'daily'}
+				<label>
+					<span>Time of day (local)</span>
+					<input type="time" bind:value={dailyTime} required />
+				</label>
+			{/if}
+		{/if}
 
 		{#if type === 'server'}
 			<label>
@@ -135,6 +171,7 @@
 
 	input[type='text'],
 	input[type='number'],
+	input[type='time'],
 	select {
 		width: 100%;
 		padding: 10px 12px;
@@ -148,6 +185,7 @@
 
 	input[type='text']:focus,
 	input[type='number']:focus,
+	input[type='time']:focus,
 	select:focus {
 		outline: none;
 		border-color: #3b82f6;

@@ -6,15 +6,20 @@ export interface Category {
 	collapsed?: boolean;
 }
 
+export type Schedule =
+	| { kind: 'interval'; minutes: number }
+	| { kind: 'daily'; time: string };
+
 export interface ProcessConfig {
 	id: string;
 	name: string;
 	description: string;
 	command: string;
 	cwd: string;
-	type: 'server' | 'job';
+	type: 'server' | 'job' | 'scheduled';
 	autoRestart?: boolean;
 	categoryId?: string;
+	schedule?: Schedule;
 }
 
 export interface ProcessState {
@@ -24,6 +29,7 @@ export interface ProcessState {
 	port?: number;
 	startedAt?: number;
 	stoppedAt?: number;
+	nextRunAt?: number;
 	metrics: {
 		cpu: number;
 		memory: number;

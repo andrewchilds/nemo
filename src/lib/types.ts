@@ -6,6 +6,13 @@ export interface Category {
 	collapsed?: boolean;
 }
 
+export type ProcessType = 'server' | 'job' | 'scheduled';
+
+/** When a scheduled task runs. Times are in the machine's local timezone. */
+export type Schedule =
+	| { kind: 'interval'; minutes: number }
+	| { kind: 'daily'; time: string }; // "HH:MM", 24-hour
+
 export interface ProcessConfig {
 	id: string;
 	name: string;
@@ -13,10 +20,12 @@ export interface ProcessConfig {
 	command: string;
 	/** Absolute path, or a path relative to the category's directory (empty = the category directory itself). */
 	cwd: string;
-	type: 'server' | 'job';
+	type: ProcessType;
 	autoRestart?: boolean;
 	port?: number;
 	categoryId?: string;
+	/** Required when type is 'scheduled'. */
+	schedule?: Schedule;
 }
 
 export interface ProcessMetric {
@@ -32,6 +41,8 @@ export interface ProcessState {
 	port?: number;
 	startedAt?: number;
 	stoppedAt?: number;
+	/** Scheduled tasks only: epoch ms of the next automatic run. */
+	nextRunAt?: number;
 	metrics: ProcessMetric[];
 }
 

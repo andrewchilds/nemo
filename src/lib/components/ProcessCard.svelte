@@ -2,7 +2,8 @@
 	import { onDestroy } from 'svelte';
 	import type { ProcessState } from '$lib/types';
 	import Button from './Button.svelte';
-	import { Server, Cog } from 'lucide-svelte';
+	import { formatCountdown } from '$lib/schedule';
+	import { Server, Cog, Clock } from 'lucide-svelte';
 
 	interface Props {
 		process: ProcessState;
@@ -30,6 +31,15 @@
 		return null;
 	});
 	let latestMetrics = $derived(process.metrics[process.metrics.length - 1]);
+
+	// Scheduled tasks show a countdown to their next run while idle
+	let nextRun = $derived.by(() => {
+		if (process.config.type !== 'scheduled' || process.status === 'running' || !process.nextRunAt) return null;
+		return {
+			countdown: formatCountdown(process.nextRunAt - now),
+			at: new Date(process.nextRunAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+		};
+	});
 
 	// Get last 20 data points for charts (~1.5 minutes at 5s intervals)
 	const MAX_BARS = 20;
@@ -82,6 +92,8 @@
 		<div class="col-name">
 			{#if process.config.type === 'server'}
 				<Server size={14} class="type-icon server" />
+			{:else if process.config.type === 'scheduled'}
+				<Clock size={14} class="type-icon scheduled" />
 			{:else}
 				<Cog size={14} class="type-icon job" />
 			{/if}
@@ -125,7 +137,9 @@
 			{#if process.status === 'error'}
 				<span class="status-text">error</span>
 			{/if}
-			{#if uptime}
+			{#if nextRun}
+				<span class="next-run" title="Next run: {nextRun.at}">in {nextRun.countdown}</span>
+			{:else if uptime}
 				<span class="uptime" class:running={process.status === 'running'} class:stopped={process.status !== 'running'}>{uptime}</span>
 			{/if}
 		</div>
@@ -195,7 +209,7 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		width: 55px;
+		width: 70px;
 		flex-shrink: 0;
 		justify-content: flex-end;
 	}
@@ -241,6 +255,18 @@
 
 	:global(.type-icon.job) {
 		color: #f59e0b;
+	}
+
+	:global(.type-icon.scheduled) {
+		color: #a855f7;
+	}
+
+	.next-run {
+		font-size: 11px;
+		color: #a855f7;
+		flex-shrink: 0;
+		text-align: right;
+		white-space: nowrap;
 	}
 
 	.uptime {

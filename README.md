@@ -11,7 +11,7 @@ A simple Electron-based process manager for running and monitoring local termina
 - Live terminal emulator with full PTY support
 - Real-time CPU and memory monitoring
 - Auto-restart option for servers that crash
-- Support for long-running servers and one-time jobs
+- Support for long-running servers, one-time jobs, and scheduled tasks (every few minutes or daily at a set time)
 
 ## Development
 
