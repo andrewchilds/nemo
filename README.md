@@ -13,6 +13,19 @@ A simple Electron-based process manager for running and monitoring local termina
 - Auto-restart option for servers that crash
 - Support for long-running servers, one-time jobs, and scheduled tasks (every few minutes or daily at a set time)
 
+## Process Types
+
+- **Servers** run until you stop them. Nemo detects the port from terminal output and can restart a server automatically if it crashes.
+- **Jobs** run a command once and show a notification when it finishes.
+- **Scheduled tasks** run a command automatically, either every N minutes (2 to 60) or once a day at a set time. Intervals align to the local clock, so a 5-minute task runs at :00, :05, :10, and so on. Each task's card shows a countdown to its next run, and you can still start one manually at any time.
+
+Notes on scheduled tasks:
+
+- They run only while Nemo is open. Runs missed while the app is closed are skipped. If the Mac sleeps through one or more runs with Nemo open, the task runs once on wake.
+- If a run is still going when the next one is due, the new run is skipped.
+- Daily tasks notify when they finish. Interval tasks don't, to avoid a notification every few minutes.
+- Times use the Mac's local timezone.
+
 ## Development
 
 ```bash
