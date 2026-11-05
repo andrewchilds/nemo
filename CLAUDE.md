@@ -55,6 +55,11 @@ Run a single test file: `bun run test:unit -- src/lib/path/to/file.spec.ts`
 - **Jobs**: One-off commands that run to completion; show a notification when they finish
 - **Scheduled**: Jobs run automatically on a schedule (`ProcessConfig.schedule`): every N minutes aligned to the local clock, or once a day at a local time. The main process checks due tasks every second (`runDueScheduledTasks`) and skips a run if the previous one is still going. Only daily tasks notify on completion. Schedule math lives in `src/lib/schedule.ts` and is mirrored in `electron/main.ts`.
 
+### Run History
+- Every process start creates a `RunRecord` (`src/lib/types.ts`, mirrored in `electron/main.ts`) stored in `nemo-data/runs/<processId>/index.json`, with raw pty output streamed to `<runId>.log` alongside it. Capped at 100 runs per process (oldest pruned on start) and 10 MB per log (`truncated` flag set, rest dropped).
+- Outcomes: `success`, `failed`, `stopped` (user stop, via `stopRequested`), `interrupted` (open records closed by `markInterruptedRuns` at launch).
+- `ProcessState.lastRun`/`runCount` feed the header strip and sidebar hints; `run:update` fires on run start and end. `Terminal.svelte` takes a `runId` prop to replay a stored log instead of the live buffer. Formatting helpers live in `src/lib/runs.ts`.
+
 ### IPC Flow
 1. Renderer calls `window.nemo.*` methods
 2. Preload forwards via `ipcRenderer.invoke()`

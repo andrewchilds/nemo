@@ -26,6 +26,12 @@ Notes on scheduled tasks:
 - Daily tasks notify when they finish. Interval tasks don't, to avoid a notification every few minutes.
 - Times use the Mac's local timezone.
 
+## Run History
+
+Every run of a process is recorded: its full terminal output, when it started, how long it took, and how it ended (exit code, stopped by you, or interrupted because Nemo quit). The bar above the terminal shows the current or most recent run, and the history button next to it opens a table of past runs. Click a run to replay its output in the terminal, step to older or newer runs with the arrows, and use "Back to live" to return to the live output. Job and scheduled task cards in the sidebar show a check or cross for how the last run ended.
+
+Nemo keeps the last 100 runs per process and caps each run's output at 10 MB; anything past the cap is dropped and the run is marked as capped. Records live in `~/Library/Application Support/nemo/nemo-data/runs/<process id>/` as an `index.json` plus one `.log` file per run, which you can read with `less -R`. "Clear history" in the history table deletes a process's recorded runs, and deleting a process deletes its history.
+
 ## Development
 
 ```bash

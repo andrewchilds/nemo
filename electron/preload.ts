@@ -22,6 +22,17 @@ export interface ProcessConfig {
 	schedule?: Schedule;
 }
 
+export interface RunRecord {
+	id: string;
+	startedAt: number;
+	endedAt?: number;
+	exitCode?: number;
+	outcome?: 'success' | 'failed' | 'stopped' | 'interrupted';
+	trigger: 'manual' | 'scheduled' | 'auto-restart';
+	bytes: number;
+	truncated?: boolean;
+}
+
 export interface ProcessState {
 	config: ProcessConfig;
 	status: 'running' | 'stopped' | 'error';
@@ -30,6 +41,8 @@ export interface ProcessState {
 	startedAt?: number;
 	stoppedAt?: number;
 	nextRunAt?: number;
+	lastRun?: RunRecord;
+	runCount?: number;
 	metrics: {
 		cpu: number;
 		memory: number;
@@ -91,6 +104,18 @@ const api = {
 		const handler = (_event: Electron.IpcRendererEvent, states: ProcessState[]) => callback(states);
 		ipcRenderer.on('metrics:update', handler);
 		return () => ipcRenderer.removeListener('metrics:update', handler);
+	},
+
+	// Run history
+	listRuns: (processId: string): Promise<RunRecord[]> => ipcRenderer.invoke('run:list', processId),
+	getRunOutput: (processId: string, runId: string): Promise<string> =>
+		ipcRenderer.invoke('run:output', processId, runId),
+	clearRuns: (processId: string): Promise<{ success: boolean }> =>
+		ipcRenderer.invoke('run:clear', processId),
+	onRunUpdate: (callback: (processId: string) => void) => {
+		const handler = (_event: Electron.IpcRendererEvent, processId: string) => callback(processId);
+		ipcRenderer.on('run:update', handler);
+		return () => ipcRenderer.removeListener('run:update', handler);
 	},
 
 	// Categories

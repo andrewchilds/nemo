@@ -47,6 +47,21 @@ interface ProcessConfig {
 	schedule?: Schedule;
 }
 
+type RunTrigger = 'manual' | 'scheduled' | 'auto-restart';
+type RunOutcome = 'success' | 'failed' | 'stopped' | 'interrupted';
+
+// Mirrors RunRecord in src/lib/types.ts
+interface RunRecord {
+	id: string;
+	startedAt: number;
+	endedAt?: number;
+	exitCode?: number;
+	outcome?: RunOutcome;
+	trigger: RunTrigger;
+	bytes: number;
+	truncated?: boolean;
+}
+
 interface ProcessState {
 	config: ProcessConfig;
 	status: 'running' | 'stopped' | 'error';
@@ -55,6 +70,8 @@ interface ProcessState {
 	startedAt?: number;
 	stoppedAt?: number;
 	nextRunAt?: number;
+	lastRun?: RunRecord;
+	runCount?: number;
 	metrics: {
 		cpu: number;
 		memory: number;
@@ -66,6 +83,10 @@ interface ManagedProcess {
 	pty: pty.IPty;
 	state: ProcessState;
 	outputBuffer: string;
+	run: RunRecord;
+	logStream: fs.WriteStream | null;
+	// Set by stopProcess so onExit can tell a user stop from a crash
+	stopRequested: boolean;
 }
 
 const DATA_DIR = path.join(app.getPath('userData'), 'nemo-data');
@@ -73,8 +94,14 @@ const CONFIG_FILE = path.join(DATA_DIR, 'processes.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const METRICS_FILE = path.join(DATA_DIR, 'metrics.json');
 const PORT_HISTORY_FILE = path.join(DATA_DIR, 'port-history.json');
+// Run history: runs/<processId>/index.json plus one <runId>.log per run
+const RUNS_DIR = path.join(DATA_DIR, 'runs');
+const MAX_RUNS_PER_PROCESS = 100;
+const MAX_RUN_LOG_BYTES = 10 * 1024 * 1024;
 
 const processes = new Map<string, ManagedProcess>();
+// Process config ID -> its run index, oldest first. Loaded lazily from disk.
+const runIndexes = new Map<string, RunRecord[]>();
 // Scheduled task ID -> epoch ms of its next automatic run
 const nextRuns = new Map<string, number>();
 let mainWindow: BrowserWindow | null = null;
@@ -157,6 +184,149 @@ function recordPortForProcess(processId: string, port: number) {
 	if (index >= 0 && configs[index].port !== port) {
 		configs[index].port = port;
 		saveProcessConfigs(configs);
+	}
+}
+
+// --- Run history ---------------------------------------------------------------
+
+function runDir(processId: string): string {
+	return path.join(RUNS_DIR, processId);
+}
+
+function runLogPath(processId: string, runId: string): string {
+	return path.join(runDir(processId), `${runId}.log`);
+}
+
+function runIndexPath(processId: string): string {
+	return path.join(runDir(processId), 'index.json');
+}
+
+function loadRunIndex(processId: string): RunRecord[] {
+	const cached = runIndexes.get(processId);
+	if (cached) return cached;
+	let runs: RunRecord[] = [];
+	try {
+		const file = runIndexPath(processId);
+		if (fs.existsSync(file)) {
+			runs = JSON.parse(fs.readFileSync(file, 'utf-8'));
+		}
+	} catch (e) {
+		console.error('Failed to load run index:', e);
+	}
+	runIndexes.set(processId, runs);
+	return runs;
+}
+
+function saveRunIndex(processId: string, runs: RunRecord[]) {
+	runIndexes.set(processId, runs);
+	try {
+		fs.mkdirSync(runDir(processId), { recursive: true });
+		fs.writeFileSync(runIndexPath(processId), JSON.stringify(runs, null, 2));
+	} catch (e) {
+		console.error('Failed to save run index:', e);
+	}
+}
+
+function deleteRunLog(processId: string, runId: string) {
+	try {
+		fs.rmSync(runLogPath(processId, runId), { force: true });
+	} catch (e) {
+		console.error('Failed to delete run log:', e);
+	}
+}
+
+function notifyRunUpdate(processId: string) {
+	mainWindow?.webContents.send('run:update', processId);
+}
+
+// Register a new run, prune history to the cap, and open its log file for writing.
+function beginRun(config: ProcessConfig, trigger: RunTrigger, startedAt: number): {
+	run: RunRecord;
+	logStream: fs.WriteStream | null;
+} {
+	const run: RunRecord = {
+		id: new Date(startedAt).toISOString().replace(/:/g, '-'),
+		startedAt,
+		trigger,
+		bytes: 0
+	};
+
+	const runs = loadRunIndex(config.id);
+	while (runs.length >= MAX_RUNS_PER_PROCESS) {
+		const oldest = runs.shift();
+		if (oldest) deleteRunLog(config.id, oldest.id);
+	}
+	runs.push(run);
+	saveRunIndex(config.id, runs);
+
+	let logStream: fs.WriteStream | null = null;
+	try {
+		logStream = fs.createWriteStream(runLogPath(config.id, run.id));
+		logStream.on('error', (e) => console.error('Run log write failed:', e));
+	} catch (e) {
+		console.error('Failed to open run log:', e);
+	}
+
+	notifyRunUpdate(config.id);
+	return { run, logStream };
+}
+
+// Append output to the run's log until it hits the size cap, then drop the rest.
+function appendRunOutput(managed: ManagedProcess, data: string) {
+	if (!managed.logStream) return;
+	const chunk = Buffer.from(data, 'utf-8');
+	const remaining = MAX_RUN_LOG_BYTES - managed.run.bytes;
+	if (chunk.length >= remaining) {
+		managed.logStream.write(chunk.subarray(0, remaining));
+		managed.run.bytes += remaining;
+		managed.run.truncated = true;
+		managed.logStream.end();
+		managed.logStream = null;
+		return;
+	}
+	managed.logStream.write(chunk);
+	managed.run.bytes += chunk.length;
+}
+
+function finishRun(managed: ManagedProcess, exitCode: number, endedAt: number) {
+	const { run, state } = managed;
+	run.endedAt = endedAt;
+	run.exitCode = exitCode;
+	run.outcome = managed.stopRequested ? 'stopped' : exitCode === 0 ? 'success' : 'failed';
+	managed.logStream?.end();
+	managed.logStream = null;
+	saveRunIndex(state.config.id, loadRunIndex(state.config.id));
+	notifyRunUpdate(state.config.id);
+}
+
+// Runs left open by a previous Nemo session can never finish; mark them interrupted.
+function markInterruptedRuns() {
+	if (!fs.existsSync(RUNS_DIR)) return;
+	for (const processId of fs.readdirSync(RUNS_DIR)) {
+		const runs = loadRunIndex(processId);
+		let modified = false;
+		for (const run of runs) {
+			if (run.endedAt !== undefined) continue;
+			let endedAt = run.startedAt;
+			try {
+				endedAt = Math.max(endedAt, fs.statSync(runLogPath(processId, run.id)).mtimeMs);
+			} catch {
+				// Log may be missing
+			}
+			run.endedAt = endedAt;
+			run.outcome = 'interrupted';
+			modified = true;
+		}
+		if (modified) saveRunIndex(processId, runs);
+	}
+}
+
+function deleteRunHistory(processId: string) {
+	runIndexes.delete(processId);
+	try {
+		fs.rmSync(runDir(processId), { recursive: true, force: true });
+	} catch (e) {
+		console.error('Failed to delete run history:', e);
 	}
 }
 
@@ -412,11 +582,11 @@ function runDueScheduledTasks() {
 		}
 		nextRuns.set(id, computeNextRun(config.schedule, now));
 		if (processes.get(id)?.state.status === 'running') continue;
-		startProcess(config);
+		startProcess(config, 'scheduled');
 	}
 }
 
-function startProcess(config: ProcessConfig): ManagedProcess | null {
+function startProcess(config: ProcessConfig, trigger: RunTrigger = 'manual'): ManagedProcess | null {
 	if (processes.has(config.id)) {
 		const existing = processes.get(config.id)!;
 		if (existing.state.status === 'running') {
@@ -443,19 +613,24 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 			env: getManagedProcessEnv()
 		});
 
+		const startedAt = Date.now();
 		const state: ProcessState = {
 			config,
 			status: 'running',
 			pid: ptyProcess.pid,
 			port: config.type === 'server' ? config.port : undefined,
-			startedAt: Date.now(),
+			startedAt,
 			metrics: []
 		};
 
+		const { run, logStream } = beginRun(config, trigger, startedAt);
 		const managed: ManagedProcess = {
 			pty: ptyProcess,
 			state,
-			outputBuffer: ''
+			outputBuffer: '',
+			run,
+			logStream,
+			stopRequested: false
 		};
 
 		ptyProcess.onData((data) => {
@@ -464,6 +639,7 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 			if (managed.outputBuffer.length > 100000) {
 				managed.outputBuffer = managed.outputBuffer.slice(-100000);
 			}
+			appendRunOutput(managed, data);
 			// Try to detect port from new output if not already set (only for servers)
 			if (!managed.state.port && config.type === 'server') {
 				const detectedPort = detectPortFromOutput(data);
@@ -478,15 +654,17 @@ function startProcess(config: ProcessConfig): ManagedProcess | null {
 		});
 
 		ptyProcess.onExit(({ exitCode }) => {
-			managed.state.status = exitCode === 0 ? 'stopped' : 'error';
+			const endedAt = Date.now();
+			managed.state.status = exitCode === 0 || managed.stopRequested ? 'stopped' : 'error';
 			managed.state.pid = undefined;
-			managed.state.stoppedAt = Date.now();
-			showTaskFinishedNotification(config, exitCode);
+			managed.state.stoppedAt = endedAt;
+			finishRun(managed, exitCode, endedAt);
+			if (!managed.stopRequested) showTaskFinishedNotification(config, exitCode);
 			mainWindow?.webContents.send('process:exit', config.id, exitCode);
 			updateTray();
 
-			if (config.autoRestart && config.type === 'server' && exitCode !== 0) {
-				setTimeout(() => startProcess(config), 3000);
+			if (config.autoRestart && config.type === 'server' && exitCode !== 0 && !managed.stopRequested) {
+				setTimeout(() => startProcess(config, 'auto-restart'), 3000);
 			}
 		});
 
@@ -504,6 +682,7 @@ function stopProcess(id: string): boolean {
 	if (!managed || managed.state.status !== 'running') return false;
 
 	try {
+		managed.stopRequested = true;
 		managed.pty.kill();
 		managed.state.status = 'stopped';
 		managed.state.pid = undefined;
@@ -628,13 +807,17 @@ async function collectMetrics() {
 	updateTray();
 }
 
-function withNextRun(state: ProcessState): ProcessState {
-	state.nextRunAt = nextRuns.get(state.config.id);
+function withRuntimeInfo(state: ProcessState): ProcessState {
+	const id = state.config.id;
+	state.nextRunAt = nextRuns.get(id);
+	const runs = loadRunIndex(id);
+	state.lastRun = runs[runs.length - 1];
+	state.runCount = runs.length;
 	return state;
 }
 
 function getProcessStates(): ProcessState[] {
-	return Array.from(processes.values()).map((p) => withNextRun(p.state));
+	return Array.from(processes.values()).map((p) => withRuntimeInfo(p.state));
 }
 
 // IPC Handlers
@@ -645,9 +828,9 @@ ipcMain.handle('process:list', () => {
 	for (const config of configs) {
 		const managed = processes.get(config.id);
 		if (managed) {
-			states.push(withNextRun(managed.state));
+			states.push(withRuntimeInfo(managed.state));
 		} else {
-			states.push(withNextRun({
+			states.push(withRuntimeInfo({
 				config,
 				status: 'stopped',
 				metrics: []
@@ -704,6 +887,7 @@ ipcMain.handle('process:delete', (_event, id: string) => {
 	saveProcessConfigs(filtered);
 	processes.delete(id);
 	nextRuns.delete(id);
+	deleteRunHistory(id);
 	updateTray();
 	return { success: true };
 });
@@ -818,6 +1002,41 @@ ipcMain.handle('process:output-buffer', (_event, id: string) => {
 	return managed?.outputBuffer || '';
 });
 
+// Run history handlers
+const SAFE_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+
+ipcMain.handle('run:list', (_event, processId: string): RunRecord[] => {
+	if (!SAFE_ID_PATTERN.test(processId)) return [];
+	return [...loadRunIndex(processId)];
+});
+
+ipcMain.handle('run:output', (_event, processId: string, runId: string): string => {
+	if (!SAFE_ID_PATTERN.test(processId) || !SAFE_ID_PATTERN.test(runId)) return '';
+	try {
+		return fs.readFileSync(runLogPath(processId, runId), 'utf-8');
+	} catch {
+		return '';
+	}
+});
+
+// Drop every finished run; a run still in progress keeps its record and log.
+ipcMain.handle('run:clear', (_event, processId: string) => {
+	if (!SAFE_ID_PATTERN.test(processId)) return { success: false };
+	const runs = loadRunIndex(processId);
+	const activeRun = processes.get(processId)?.run;
+	const kept: RunRecord[] = [];
+	for (const run of runs) {
+		if (run === activeRun && run.endedAt === undefined) {
+			kept.push(run);
+		} else {
+			deleteRunLog(processId, run.id);
+		}
+	}
+	saveRunIndex(processId, kept);
+	notifyRunUpdate(processId);
+	return { success: true };
+});
+
 interface ListeningProcess {
 	pid: number;
 	port: number;
@@ -913,6 +1132,7 @@ ipcMain.handle('system:kill-process', async (_event, pid: number): Promise<{ suc
 
 app.whenReady().then(() => {
 	ensureDataDirs();
+	markInterruptedRuns();
 	createWindow();
 	createTray();
 
@@ -938,6 +1158,7 @@ app.on('before-quit', () => {
 	isQuitting = true;
 	for (const [, managed] of processes) {
 		try {
+			managed.stopRequested = true;
 			managed.pty.kill();
 		} catch {
 			// Ignore

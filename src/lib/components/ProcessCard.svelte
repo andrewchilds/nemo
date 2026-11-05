@@ -3,7 +3,8 @@
 	import type { ProcessState } from '$lib/types';
 	import Button from './Button.svelte';
 	import { formatCountdown } from '$lib/schedule';
-	import { Server, Cog, Clock } from 'lucide-svelte';
+	import { formatDuration, formatRunTime, isFailure } from '$lib/runs';
+	import { Server, Cog, Clock, Check, X } from 'lucide-svelte';
 
 	interface Props {
 		process: ProcessState;
@@ -20,15 +21,30 @@
 	onDestroy(() => clearInterval(interval));
 
 	let uptime = $derived.by(() => {
-		if (!process.startedAt) return null;
-		if (process.status === 'running') {
+		if (process.status === 'running' && process.startedAt) {
 			return formatUptime(now - process.startedAt);
 		}
-		// For stopped/error processes, show the final duration
-		if (process.stoppedAt) {
+		// For stopped/error processes, show how long the last run took
+		const last = process.lastRun;
+		if (last?.endedAt !== undefined) {
+			return formatUptime(last.endedAt - last.startedAt);
+		}
+		if (process.startedAt && process.stoppedAt) {
 			return formatUptime(process.stoppedAt - process.startedAt);
 		}
 		return null;
+	});
+
+	// Jobs and scheduled tasks show how their last run ended, so an overnight failure is visible at a glance
+	let lastOutcome = $derived.by(() => {
+		const last = process.lastRun;
+		if (process.status === 'running' || process.config.type === 'server') return null;
+		if (!last?.outcome || last.outcome === 'stopped') return null;
+		const failed = isFailure(last.outcome);
+		const when = formatRunTime(last.startedAt, now);
+		const took = last.endedAt !== undefined ? formatDuration(last.endedAt - last.startedAt) : '';
+		const how = last.outcome === 'interrupted' ? 'was interrupted' : failed ? `failed (exit ${last.exitCode})` : 'succeeded';
+		return { failed, title: `Last run ${how} · ${when} · ${took}` };
 	});
 	let latestMetrics = $derived(process.metrics[process.metrics.length - 1]);
 
@@ -134,6 +150,15 @@
 		</div>
 
 		<div class="col-status">
+			{#if lastOutcome}
+				<span class="outcome" class:failed={lastOutcome.failed} title={lastOutcome.title}>
+					{#if lastOutcome.failed}
+						<X size={12} />
+					{:else}
+						<Check size={12} />
+					{/if}
+				</span>
+			{/if}
 			{#if process.status === 'error'}
 				<span class="status-text">error</span>
 			{/if}
@@ -209,7 +234,7 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		width: 70px;
+		width: 90px;
 		flex-shrink: 0;
 		justify-content: flex-end;
 	}
@@ -287,6 +312,17 @@
 		font-size: 11px;
 		color: #ef4444;
 		text-transform: capitalize;
+	}
+
+	.outcome {
+		display: flex;
+		align-items: center;
+		color: #22c55e;
+		flex-shrink: 0;
+	}
+
+	.outcome.failed {
+		color: #ef4444;
 	}
 
 	.metric {

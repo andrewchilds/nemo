@@ -123,6 +123,11 @@ export function setupProcessListeners() {
 		loadProcesses();
 	});
 
+	// Fires when a run starts or ends, including scheduled runs started in the background
+	const unsubRuns = window.nemo.onRunUpdate(() => {
+		loadProcesses();
+	});
+
 	const unsubMetrics = window.nemo.onMetricsUpdate((updatedStates) => {
 		// Merge metrics updates with existing process list instead of replacing
 		processes.update((currentProcesses) => {
@@ -139,6 +144,7 @@ export function setupProcessListeners() {
 	return () => {
 		unsubOutput();
 		unsubExit();
+		unsubRuns();
 		unsubMetrics();
 	};
 }

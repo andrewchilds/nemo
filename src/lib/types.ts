@@ -34,6 +34,29 @@ export interface ProcessMetric {
 	timestamp: number;
 }
 
+export type RunTrigger = 'manual' | 'scheduled' | 'auto-restart';
+
+/**
+ * How a run ended. `stopped` means the user stopped it, `interrupted` means Nemo quit
+ * while it was still running.
+ */
+export type RunOutcome = 'success' | 'failed' | 'stopped' | 'interrupted';
+
+/** One recorded execution of a process. Output lives in `runs/<processId>/<id>.log`. */
+export interface RunRecord {
+	id: string;
+	startedAt: number;
+	/** Absent while the run is still going. */
+	endedAt?: number;
+	exitCode?: number;
+	outcome?: RunOutcome;
+	trigger: RunTrigger;
+	/** Bytes of output written to the log file. */
+	bytes: number;
+	/** Set when output exceeded the per-run log cap and the rest was dropped. */
+	truncated?: boolean;
+}
+
 export interface ProcessState {
 	config: ProcessConfig;
 	status: 'running' | 'stopped' | 'error';
@@ -43,6 +66,10 @@ export interface ProcessState {
 	stoppedAt?: number;
 	/** Scheduled tasks only: epoch ms of the next automatic run. */
 	nextRunAt?: number;
+	/** The current run if running, otherwise the most recent recorded run. */
+	lastRun?: RunRecord;
+	/** Number of recorded runs, including the current one. */
+	runCount?: number;
 	metrics: ProcessMetric[];
 }
 
@@ -72,6 +99,11 @@ export interface NemoAPI {
 	onProcessOutput: (callback: (id: string, data: string) => void) => () => void;
 	onProcessExit: (callback: (id: string, exitCode: number) => void) => () => void;
 	onMetricsUpdate: (callback: (states: ProcessState[]) => void) => () => void;
+	// Run history
+	listRuns: (processId: string) => Promise<RunRecord[]>;
+	getRunOutput: (processId: string, runId: string) => Promise<string>;
+	clearRuns: (processId: string) => Promise<{ success: boolean }>;
+	onRunUpdate: (callback: (processId: string) => void) => () => void;
 	// Categories
 	listCategories: () => Promise<Category[]>;
 	addCategory: (category: Category) => Promise<{ success: boolean }>;
